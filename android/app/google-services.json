@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "79610139654",
+    "project_id": "timewise-1dabc",
+    "storage_bucket": "timewise-1dabc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:79610139654:android:d322cbdad63ea1ae3a1f87",
+        "android_client_info": {
+          "package_name": "com.example.timewise"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "79610139654-kotne3qgohfltrnvdtdjiavso8n0ec42.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCjXfemWP60yZKf1zOarqta8dPHQ_wSGao"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "79610139654-kotne3qgohfltrnvdtdjiavso8n0ec42.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
