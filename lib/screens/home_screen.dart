@@ -6,6 +6,7 @@ import 'tasks/tasks_screen.dart';
 import 'schedule/schedule_screen.dart';
 import 'profile_screen.dart';
 import 'tasks/add_task_screen.dart';
+import 'schedule/add_fixed_event_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -72,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 desc: 'Add a personal event',
                 onTap: () {
                   Navigator.pop(context);
-                  // Not yet implemented AddScheduleScreen in Flutter
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => AddFixedEventScreen(date: DateTime.now())));
                 },
               ),
               Divider(height: 1, color: theme.colorScheme.outline),
@@ -83,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 desc: 'Add a fixed recurring block',
                 onTap: () {
                   Navigator.pop(context);
-                  // Not yet implemented class add screen
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => AddFixedEventScreen(date: DateTime.now())));
                 },
               ),
               Divider(height: 1, color: theme.colorScheme.outline),
