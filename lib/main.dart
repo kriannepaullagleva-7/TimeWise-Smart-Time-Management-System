@@ -7,7 +7,8 @@ import 'services/notification_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/task_provider.dart';
 import 'providers/schedule_provider.dart';
-import 'screens/auth/login_screen.dart';
+import 'screens/splash/loading_screen.dart';
+import 'screens/onboarding/welcome_screen.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -57,16 +58,14 @@ class AuthWrapper extends StatelessWidget {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, _) {
         if (!authProvider.isReady) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const LoadingScreen();
         }
 
         if (authProvider.isAuthenticated) {
           return const HomeScreen();
         }
 
-        return const LoginScreen();
+        return const WelcomeScreen();
       },
     );
   }

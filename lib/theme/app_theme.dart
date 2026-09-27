@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// Central Material 3 theme for TimeWise. Component themes live here so
 /// screens style themselves through `Theme.of(context)` instead of
@@ -6,17 +7,10 @@ import 'package:flutter/material.dart';
 class AppTheme {
   AppTheme._();
 
-  static const _seed = Color(0xFF3B5BFE);
+  static ThemeData light() => _build(AppColors.lightColorScheme);
+  static ThemeData dark() => _build(AppColors.darkColorScheme);
 
-  static ThemeData light() => _build(Brightness.light);
-  static ThemeData dark() => _build(Brightness.dark);
-
-  static ThemeData _build(Brightness brightness) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: _seed,
-      brightness: brightness,
-    );
-
+  static ThemeData _build(ColorScheme colorScheme) {
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
