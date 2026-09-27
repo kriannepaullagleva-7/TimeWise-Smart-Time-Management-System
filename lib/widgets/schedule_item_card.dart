@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/schedule.dart';
+import '../theme/app_colors.dart';
 
 class ScheduleItemCard extends StatelessWidget {
   final ScheduleItem item;
@@ -9,135 +10,134 @@ class ScheduleItemCard extends StatelessWidget {
 
   const ScheduleItemCard({required this.item, this.onDelete, super.key});
 
-  IconData _getTypeIcon() {
-    switch (item.type) {
-      case ScheduleTypes.class_:
-        return Icons.school;
-      case ScheduleTypes.work:
-        return Icons.work;
-      case ScheduleTypes.appointment:
-        return Icons.event;
-      case ScheduleTypes.travel:
-        return Icons.directions_car;
-      case ScheduleTypes.breakTime:
-        return Icons.free_breakfast;
-      case ScheduleTypes.meal:
-        return Icons.restaurant;
-      case ScheduleTypes.sleep:
-        return Icons.bedtime;
-      case ScheduleTypes.exercise:
-        return Icons.fitness_center;
-      case ScheduleTypes.personal:
-        return Icons.self_improvement;
-      default:
-        return Icons.task_alt;
-    }
+  Color _getBackgroundColor() {
+    if (item.isFixed) return AppColors.primary.withValues(alpha: 0.1);
+    if (item.isAISuggested) return AppColors.secondary.withValues(alpha: 0.1);
+    if (item.type == 'break') return const Color(0xFFF59E0B).withValues(alpha: 0.1);
+    return const Color(0xFF22C55E).withValues(alpha: 0.1); // Personal/Available
   }
 
-  Color _getTypeColor() {
-    switch (item.type) {
-      case ScheduleTypes.class_:
-        return Colors.purple;
-      case ScheduleTypes.work:
-        return Colors.blue;
-      case ScheduleTypes.appointment:
-        return Colors.orange;
-      case ScheduleTypes.travel:
-        return Colors.brown;
-      case ScheduleTypes.breakTime:
-        return Colors.grey;
-      case ScheduleTypes.meal:
-        return Colors.amber[800]!;
-      case ScheduleTypes.sleep:
-        return Colors.indigo;
-      case ScheduleTypes.exercise:
-        return Colors.green;
-      case ScheduleTypes.personal:
-        return Colors.pink;
-      default:
-        return Colors.teal;
-    }
+  Color _getAccentColor() {
+    if (item.isFixed) return AppColors.primary;
+    if (item.isAISuggested) return AppColors.secondary;
+    if (item.type == 'break') return const Color(0xFFF59E0B);
+    return const Color(0xFF22C55E); // Personal/Available
+  }
+
+  String _getTypeLabel() {
+    if (item.isFixed) return '🔒 Fixed';
+    if (item.isAISuggested) return '✨ AI';
+    if (item.type == 'break') return '☕ Break';
+    return '👤 Personal';
+  }
+
+  void _showMenu(BuildContext context) {
+    if (onDelete == null) return;
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return Container(
+          margin: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: theme.colorScheme.outline),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
+                title: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+                onTap: () {
+                  Navigator.pop(context);
+                  onDelete!();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final timeFormat = DateFormat('HH:mm');
-    final color = _getTypeColor();
+    final theme = Theme.of(context);
+    final timeFormat = DateFormat('h:mm a');
+    final bg = _getBackgroundColor();
+    final accent = _getAccentColor();
     final now = DateTime.now();
-    final isCurrent = now.isAfter(item.startTime) && now.isBefore(item.endTime);
     final isPast = now.isAfter(item.endTime);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: isCurrent
-          ? RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: color, width: 2),
-            )
-          : null,
-      child: Opacity(
-        opacity: isPast ? 0.6 : 1,
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: color.withValues(alpha: 0.15),
-            child: Icon(_getTypeIcon(), color: color),
-          ),
-          title: Text(
-            item.title,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return GestureDetector(
+      onTap: onDelete != null ? () => _showMenu(context) : null,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: accent.withValues(alpha: 0.3)),
+        ),
+        child: Opacity(
+          opacity: isPast ? 0.6 : 1.0,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 4),
-              Text(
-                '${timeFormat.format(item.startTime)} - ${timeFormat.format(item.endTime)}',
-                style: const TextStyle(fontSize: 12),
-              ),
-              if (item.note != null && item.note!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  item.note!,
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+              Container(
+                width: 2,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: accent,
+                  borderRadius: BorderRadius.circular(1),
                 ),
-              ],
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 10,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  if (item.isFixed) ...[
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.push_pin, size: 12, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text('Fixed', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                    ]),
-                  ] else if (item.isAISuggested) ...[
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.auto_awesome, size: 12, color: Colors.deepPurple),
-                      const SizedBox(width: 4),
-                      const Text(
-                        'AI Suggested',
-                        style: TextStyle(fontSize: 11, color: Colors.deepPurple),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: theme.colorScheme.onSurface,
                       ),
-                    ]),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${timeFormat.format(item.startTime)} - ${timeFormat.format(item.endTime)} · ${item.duration.inMinutes}m',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ],
-                  if (item.isRecurring)
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.repeat, size: 12, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text('Repeats', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                    ]),
-                ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _getTypeLabel(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: accent,
+                  ),
+                ),
               ),
             ],
           ),
-          trailing: onDelete != null
-              ? IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: onDelete,
-                )
-              : null,
         ),
       ),
     );
