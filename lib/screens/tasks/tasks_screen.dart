@@ -8,6 +8,7 @@ import '../../theme/app_colors.dart';
 import '../../widgets/task_card.dart';
 import '../../widgets/empty_state.dart';
 import 'add_task_screen.dart';
+import 'task_detail_screen.dart';
 
 class TasksScreen extends StatefulWidget {
   const TasksScreen({super.key});
@@ -21,9 +22,15 @@ class _TasksScreenState extends State<TasksScreen> {
   String _filter = 'all'; // 'all', 'pending', 'completed'
 
   void _openTask(BuildContext context, {Task? task}) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => AddTaskScreen(task: task)),
-    );
+    if (task == null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AddTaskScreen()),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TaskDetailScreen(task: task)),
+      );
+    }
   }
 
   Future<void> _confirmDeleteTask(BuildContext context, Task task) async {
