@@ -23,7 +23,14 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
       if (_currentUser?.uid != firebaseUser.uid) {
-        _currentUser = await _authService.getUserProfile(firebaseUser.uid);
+        UserModel? profile = await _authService.getUserProfile(firebaseUser.uid);
+        profile ??= UserModel(
+          uid: firebaseUser.uid,
+          email: firebaseUser.email ?? 'guest_${firebaseUser.uid.substring(0, 5)}@guest.com',
+          name: firebaseUser.displayName ?? 'Guest User',
+          createdAt: DateTime.now(),
+        );
+        _currentUser = profile;
       }
       _authReady = true;
       notifyListeners();
@@ -40,6 +47,34 @@ class AuthProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _authService.currentUser != null;
 
+  String _handleAuthError(dynamic e) {
+    if (e is FirebaseAuthException) {
+      switch (e.code) {
+        case 'invalid-credential':
+        case 'wrong-password':
+        case 'user-not-found':
+          return 'Invalid email or password.';
+        case 'invalid-email':
+          return 'The email address is not valid.';
+        case 'email-already-in-use':
+          return 'An account already exists for that email.';
+        case 'weak-password':
+          return 'The password provided is too weak.';
+        case 'user-disabled':
+          return 'This account has been disabled.';
+        case 'operation-not-allowed':
+          return 'Operation not allowed. Please contact support.';
+        case 'network-request-failed':
+          return 'Network error. Please check your connection.';
+        case 'too-many-requests':
+          return 'Too many attempts. Please try again later.';
+        default:
+          return 'Authentication failed. Please try again.';
+      }
+    }
+    return 'An unexpected error occurred.';
+  }
+
   /// True once the initial Firebase auth state (and, if signed in, the
   /// matching Firestore profile) has been resolved at least once.
   bool get isReady => _authReady;
@@ -55,7 +90,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = _handleAuthError(e);
       _isLoading = false;
       notifyListeners();
       return false;
@@ -73,7 +108,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = _handleAuthError(e);
       _isLoading = false;
       notifyListeners();
       return false;
@@ -91,7 +126,25 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return _currentUser != null;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = _handleAuthError(e);
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> signInAsGuest() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await _authService.signInAnonymously();
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = _handleAuthError(e);
       _isLoading = false;
       notifyListeners();
       return false;
@@ -104,7 +157,7 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = null;
       notifyListeners();
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = _handleAuthError(e);
       notifyListeners();
     }
   }
@@ -119,7 +172,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = _handleAuthError(e);
       _isLoading = false;
       notifyListeners();
       return false;

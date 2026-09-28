@@ -1,3 +1,4 @@
+// ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -44,7 +45,8 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      if (!success && mounted) {
+      if (!mounted) return;
+      if (!success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -58,14 +60,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _signInWithGoogle() async {
     bool success = await context.read<AuthProvider>().signInWithGoogle();
-    if (!success && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.read<AuthProvider>().errorMessage ?? 'Google sign in failed',
-          ),
-        ),
-      );
+    if (!mounted) return;
+    if (!success) {
+      final error = context.read<AuthProvider>().errorMessage;
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
+      }
     }
   }
 
@@ -373,7 +375,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 24),
 
                     OutlinedButton(
-                      onPressed: _signInWithGoogle,
+                      onPressed: context.watch<AuthProvider>().isLoading ? null : _signInWithGoogle,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -399,10 +401,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 16),
                     
                     OutlinedButton(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Guest login is not implemented in the current backend.')),
-                        );
+                      onPressed: context.watch<AuthProvider>().isLoading ? null : () async {
+                        bool success = await context.read<AuthProvider>().signInAsGuest();
+                        if (!mounted) return;
+                        if (!success) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                context.read<AuthProvider>().errorMessage ?? 'Guest sign in failed',
+                              ),
+                            ),
+                          );
+                        }
                       },
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),

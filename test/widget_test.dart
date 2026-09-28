@@ -41,6 +41,9 @@ class _FakeAuthService implements AuthService {
 
   @override
   Future<void> updateUserProfile(UserModel user) async {}
+
+  @override
+  Future<UserModel?> signInAnonymously() async => null;
 }
 
 void main() {
