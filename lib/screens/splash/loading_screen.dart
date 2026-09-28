@@ -36,7 +36,7 @@ class LoadingScreen extends StatelessWidget {
                 ),
               ),
               child: const Center(
-                child: MascotLogo(size: 44),
+                child: MascotLogo(size: 72),
               ),
             ),
             const SizedBox(height: 16),

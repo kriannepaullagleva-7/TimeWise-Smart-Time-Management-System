@@ -190,6 +190,10 @@ class _TasksScreenState extends State<TasksScreen> {
                               hintText: 'Search tasks...',
                               hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
                               border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              filled: false,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
                             ),
                           ),
                         ),
@@ -233,7 +237,11 @@ class _TasksScreenState extends State<TasksScreen> {
                             return TaskCard(
                               task: task,
                               onComplete: () {
-                                context.read<TaskProvider>().updateTask(task.copyWith(isCompleted: !task.isCompleted));
+                                if (task.isCompleted) {
+                                  context.read<TaskProvider>().reopenTask(task);
+                                } else {
+                                  context.read<TaskProvider>().completeTask(task);
+                                }
                               },
                               onDelete: () => _confirmDeleteTask(context, task),
                               onTap: () => _openTask(context, task: task),

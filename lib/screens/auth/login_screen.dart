@@ -46,7 +46,9 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (!mounted) return;
-      if (!success) {
+      if (success) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -61,7 +63,9 @@ class _LoginScreenState extends State<LoginScreen> {
   void _signInWithGoogle() async {
     bool success = await context.read<AuthProvider>().signInWithGoogle();
     if (!mounted) return;
-    if (!success) {
+    if (success) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } else {
       final error = context.read<AuthProvider>().errorMessage;
       if (error != null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -110,14 +114,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     Column(
                       children: [
                         Container(
-                          width: 56,
-                          height: 56,
+                          width: 80,
+                          height: 80,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(18),
+                            borderRadius: BorderRadius.circular(24),
                             gradient: AppColors.btnGradient,
                           ),
                           child: const Center(
-                            child: MascotLogo(size: 32),
+                            child: MascotLogo(size: 72),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -404,7 +408,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: context.watch<AuthProvider>().isLoading ? null : () async {
                         bool success = await context.read<AuthProvider>().signInAsGuest();
                         if (!mounted) return;
-                        if (!success) {
+                        if (success) {
+                          Navigator.of(context).popUntil((route) => route.isFirst);
+                        } else {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(

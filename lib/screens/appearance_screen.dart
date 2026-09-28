@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'package:provider/provider.dart';
+
+import '../../providers/theme_provider.dart';
 import '../../theme/app_colors.dart';
 
 class AppearanceScreen extends StatefulWidget {
@@ -13,6 +16,62 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
   String _selectedMode = 'system';
   String _activePreset = 'Default (Indigo)';
   Color _localAccent = AppColors.primary;
+  
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final themeProvider = context.read<ThemeProvider>();
+      setState(() {
+        _localAccent = themeProvider.accentColor;
+        switch (themeProvider.themeMode) {
+          case ThemeMode.light:
+            _selectedMode = 'light';
+            break;
+          case ThemeMode.dark:
+            _selectedMode = 'dark';
+            break;
+          default:
+            _selectedMode = 'system';
+        }
+        
+        bool foundPreset = false;
+        for (var preset in _presets) {
+          if (preset['primary'] == _localAccent) {
+            _activePreset = preset['name'];
+            foundPreset = true;
+            break;
+          }
+        }
+        if (!foundPreset) {
+          _activePreset = 'Custom';
+        }
+      });
+    });
+  }
+
+  void _updateThemeMode(String value) {
+    setState(() {
+      _selectedMode = value;
+    });
+    ThemeMode mode;
+    if (value == 'light') {
+      mode = ThemeMode.light;
+    } else if (value == 'dark') {
+      mode = ThemeMode.dark;
+    } else {
+      mode = ThemeMode.system;
+    }
+    context.read<ThemeProvider>().setThemeMode(mode);
+  }
+
+  void _updateAccentColor(Color color, String presetName) {
+    setState(() {
+      _localAccent = color;
+      _activePreset = presetName;
+    });
+    context.read<ThemeProvider>().setAccentColor(color);
+  }
   
   final List<Map<String, dynamic>> _modes = [
     {'value': 'system', 'label': 'System', 'icon': Icons.settings},
@@ -98,7 +157,7 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
                           final isSelected = _selectedMode == m['value'];
                           return Expanded(
                             child: GestureDetector(
-                              onTap: () => setState(() => _selectedMode = m['value']),
+                              onTap: () => _updateThemeMode(m['value'] as String),
                               child: Container(
                                 margin: const EdgeInsets.symmetric(horizontal: 4),
                                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -152,10 +211,7 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
                         final preset = _presets[index];
                         final isSelected = _activePreset == preset['name'];
                         return GestureDetector(
-                          onTap: () => setState(() {
-                            _activePreset = preset['name'];
-                            _localAccent = preset['primary'] as Color;
-                          }),
+                          onTap: () => _updateAccentColor(preset['primary'] as Color, preset['name'] as String),
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
                             decoration: BoxDecoration(
@@ -224,10 +280,7 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
                         children: _swatches.map((color) {
                           final isSelected = _localAccent == color;
                           return GestureDetector(
-                            onTap: () => setState(() {
-                              _localAccent = color;
-                              _activePreset = 'Custom';
-                            }),
+                            onTap: () => _updateAccentColor(color, 'Custom'),
                             child: Container(
                               width: 40,
                               height: 40,
@@ -270,54 +323,35 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Theme applied! (UI Only)')),
-                  );
-                  Navigator.pop(context);
-                },
+                onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _localAccent,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                child: const Text('Apply Theme', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                child: const Text('Done', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      side: BorderSide(color: theme.colorScheme.outline),
-                    ),
-                    child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                  ),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: OutlinedButton(
+                onPressed: () {
+                  setState(() {
+                    _selectedMode = 'system';
+                    _activePreset = 'Default (Indigo)';
+                    _localAccent = AppColors.primary;
+                  });
+                  context.read<ThemeProvider>().reset();
+                },
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  side: BorderSide(color: Colors.red.withValues(alpha: 0.3)),
+                  backgroundColor: Colors.red.withValues(alpha: 0.05),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      setState(() {
-                        _selectedMode = 'system';
-                        _activePreset = 'Default (Indigo)';
-                        _localAccent = AppColors.primary;
-                      });
-                    },
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      side: BorderSide(color: Colors.red.withValues(alpha: 0.3)),
-                      backgroundColor: Colors.red.withValues(alpha: 0.05),
-                    ),
-                    child: const Text('Reset', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
+                child: const Text('Reset to Default', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              ),
             ),
           ],
         ),

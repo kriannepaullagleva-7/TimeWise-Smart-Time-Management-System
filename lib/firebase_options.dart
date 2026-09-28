@@ -58,7 +58,6 @@ class DefaultFirebaseOptions {
     projectId: 'timewise-1dabc',
     storageBucket: 'timewise-1dabc.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyAad5fLpYfesitcAu8ESoBGBoOvHrslxnI',
     appId: '1:79610139654:ios:1a2f1fe8fb3799773a1f87',
@@ -68,7 +67,6 @@ class DefaultFirebaseOptions {
     iosClientId: '79610139654-4irlj6un07fisot52j5kpr2db85chb1m.apps.googleusercontent.com',
     iosBundleId: 'com.example.timewise',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyAad5fLpYfesitcAu8ESoBGBoOvHrslxnI',
     appId: '1:79610139654:ios:1a2f1fe8fb3799773a1f87',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/mascot_logo.dart';
+import '../auth/login_screen.dart';
 import 'quiz_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
@@ -41,10 +42,10 @@ class WelcomeScreen extends StatelessWidget {
                           ),
                         ),
                         Container(
-                          width: 112,
-                          height: 112,
+                          width: 140,
+                          height: 140,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(32),
+                            borderRadius: BorderRadius.circular(40),
                             gradient: AppColors.btnGradient,
                             boxShadow: [
                               BoxShadow(
@@ -55,7 +56,7 @@ class WelcomeScreen extends StatelessWidget {
                             ],
                           ),
                           child: const Center(
-                            child: MascotLogo(size: 56),
+                            child: MascotLogo(size: 120),
                           ),
                         ),
                       ],
@@ -95,7 +96,7 @@ class WelcomeScreen extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
               child: Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
@@ -134,6 +135,27 @@ class WelcomeScreen extends StatelessWidget {
                         ),
                       ),
                     ),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const LoginScreen(),
+                    ),
+                  );
+                },
+                child: const Text(
+                  'Already have an account? Log In',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),

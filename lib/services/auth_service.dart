@@ -162,7 +162,23 @@ class AuthService {
         await _firestore.collection('users').doc(user.uid).get();
 
     if (doc.exists) {
-      return UserModel.fromMap(doc.data() as Map<String, dynamic>);
+      var existing = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+      bool changed = false;
+      
+      if (photoUrl != null && photoUrl != existing.profileImageUrl) {
+        existing = existing.copyWith(profileImageUrl: photoUrl);
+        changed = true;
+      }
+      
+      if (fallbackName != null && fallbackName != 'User' && fallbackName != existing.name) {
+        existing = existing.copyWith(name: fallbackName);
+        changed = true;
+      }
+      
+      if (changed) {
+        await _firestore.collection('users').doc(user.uid).set(existing.toMap());
+      }
+      return existing;
     }
 
     // Profile missing — create a minimal one so the app never crashes

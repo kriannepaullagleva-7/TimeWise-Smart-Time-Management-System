@@ -7,8 +7,8 @@ import 'app_colors.dart';
 class AppTheme {
   AppTheme._();
 
-  static ThemeData light() => _build(AppColors.lightColorScheme);
-  static ThemeData dark() => _build(AppColors.darkColorScheme);
+  static ThemeData light({Color? accentColor}) => _build(AppColors.lightColorScheme.copyWith(primary: accentColor, primaryContainer: accentColor));
+  static ThemeData dark({Color? accentColor}) => _build(AppColors.darkColorScheme.copyWith(primary: accentColor, primaryContainer: accentColor));
 
   static ThemeData _build(ColorScheme colorScheme) {
     return ThemeData(

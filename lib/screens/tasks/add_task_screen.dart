@@ -52,8 +52,10 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   late int? _reminderMinutes = widget.task?.reminderMinutesBefore;
   RecurrenceRule _recurrenceRule = RecurrenceRule.none;
   late bool _recurring = widget.task?.recurrenceId != null;
+  late List<Subtask> _subtasks = widget.task?.subtasks.toList() ?? [];
 
   bool _submitted = false;
+  bool _isSaving = false;
 
   bool get _isEditing => widget.task != null;
   bool get _isEditingSeriesMember => widget.task?.recurrenceId != null;
@@ -115,8 +117,12 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   }
 
   void _save() async {
+    if (_isSaving) return;
+    
     final title = _titleController.text.trim();
     if (title.isEmpty) return;
+
+    setState(() => _isSaving = true);
 
     final duration = int.tryParse(_durationController.text) ?? 60;
 
@@ -144,6 +150,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
       isCompleted: widget.task?.isCompleted ?? false,
       createdAt: widget.task?.createdAt ?? DateTime.now(),
       reminderMinutesBefore: _reminderMinutes,
+      subtasks: _subtasks,
     );
 
     if (_isEditing) {
@@ -514,42 +521,124 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        Text(
-                          '+ Add',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.primary,
+                        GestureDetector(
+                          onTap: () {
+                            String newTitle = '';
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Add Subtask'),
+                                content: TextField(
+                                  autofocus: true,
+                                  decoration: const InputDecoration(hintText: 'Subtask title...'),
+                                  onChanged: (v) => newTitle = v,
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      if (newTitle.trim().isNotEmpty) {
+                                        setState(() {
+                                          _subtasks.add(Subtask(
+                                            id: UniqueKey().toString(),
+                                            title: newTitle.trim(),
+                                          ));
+                                        });
+                                      }
+                                      Navigator.pop(context);
+                                    },
+                                    child: const Text('Add'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          child: Text(
+                            '+ Add',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.primary,
+                            ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: theme.colorScheme.outline,
-                          style: BorderStyle.none,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.list, size: 16, color: theme.colorScheme.onSurfaceVariant),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Break this task into subtasks',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                    if (_subtasks.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainer,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: theme.colorScheme.outline,
+                            style: BorderStyle.none,
                           ),
-                        ],
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.list, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Break this task into subtasks',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Column(
+                        children: _subtasks.asMap().entries.map((entry) {
+                          int idx = entry.key;
+                          Subtask st = entry.value;
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainer,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: theme.colorScheme.outline),
+                            ),
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: st.isCompleted,
+                                  activeColor: AppColors.primary,
+                                  onChanged: (v) {
+                                    setState(() {
+                                      _subtasks[idx] = st.copyWith(isCompleted: v ?? false);
+                                    });
+                                  },
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    st.title,
+                                    style: TextStyle(
+                                      decoration: st.isCompleted ? TextDecoration.lineThrough : null,
+                                      color: st.isCompleted ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.onSurface,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: Icon(Icons.close, size: 18, color: theme.colorScheme.error),
+                                  onPressed: () {
+                                    setState(() {
+                                      _subtasks.removeAt(idx);
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
                       ),
-                    ),
 
                     const SizedBox(height: 32),
 
@@ -575,12 +664,18 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                         color: Colors.transparent,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: _titleController.text.trim().isNotEmpty ? _save : null,
+                          onTap: _titleController.text.trim().isNotEmpty && !_isSaving && !_submitted ? _save : null,
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             alignment: Alignment.center,
-                            child: Text(
-                              _isEditing ? 'Save Changes' : 'Add Task',
+                            child: _isSaving 
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : Text(
+                                    _isEditing ? 'Save Changes' : 'Add Task',
                               style: TextStyle(
                                 color: _titleController.text.trim().isNotEmpty ? Colors.white : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                                 fontSize: 16,

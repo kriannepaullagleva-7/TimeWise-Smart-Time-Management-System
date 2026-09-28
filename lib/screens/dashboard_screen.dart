@@ -8,8 +8,10 @@ import '../../providers/task_provider.dart';
 import '../../providers/schedule_provider.dart';
 import '../../models/task.dart';
 import '../../models/schedule.dart';
-import '../../theme/app_colors.dart';
+import '../theme/app_colors.dart';
 import 'tasks/add_task_screen.dart';
+import 'tasks/focus_screen.dart';
+import '../providers/focus_provider.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Function(int) onNavigateToTab;
@@ -114,9 +116,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   // Greeting
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      Image.asset(
+                        'assets/images/timewise_pet.png',
+                        width: 48,
+                        height: 48,
+                      ),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,28 +149,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
-                          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.2)),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('🔥', style: TextStyle(fontSize: 14)),
-                            SizedBox(width: 4),
-                            Text(
-                              '7',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFFFCD34D),
-                              ),
+                      StreamBuilder<List<Task>>(
+                        stream: context.read<TaskProvider>().getUserTasksStream(userId),
+                        builder: (context, snapshot) {
+                          final streak = context.read<TaskProvider>().calculateStreak(snapshot.data ?? []);
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                              border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.2)),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                          ],
-                        ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('🔥', style: TextStyle(fontSize: 14)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$streak',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFFFCD34D),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
                       ),
                     ],
                   ),
@@ -182,6 +196,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       final completed = todayTasks.where((t) => t.isCompleted).length;
                       final total = todayTasks.length;
                       final pct = total == 0 ? 0 : ((completed / total) * 100).round();
+
+                      // Calculate Streak
+                      int streak = context.read<TaskProvider>().calculateStreak(tasks);
+                      
+                      final completedDates = tasks
+                          .where((t) => t.isCompleted)
+                          .map((t) {
+                            final date = t.completedAt ?? t.deadline;
+                            return DateTime(date.year, date.month, date.day);
+                          })
+                          .toSet()
+                          .toList();
+                          
+                      final todayDate = DateTime(today.year, today.month, today.day);
+
+                      // Calculate weekly active days (Mon to Sun)
+                      final currentWeekday = todayDate.weekday; // 1 = Mon, 7 = Sun
+                      final startOfWeek = todayDate.subtract(Duration(days: currentWeekday - 1));
 
                       return Row(
                         children: [
@@ -283,7 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
                                       Text(
-                                        '7',
+                                        '$streak',
                                         style: TextStyle(
                                           fontSize: 28,
                                           fontWeight: FontWeight.w900,
@@ -308,7 +340,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].asMap().entries.map((entry) {
                                       int idx = entry.key;
                                       String d = entry.value;
-                                      bool active = idx < 6;
+                                      final checkDay = startOfWeek.add(Duration(days: idx));
+                                      bool active = completedDates.contains(checkDay);
                                       return Expanded(
                                         child: Column(
                                           children: [
@@ -446,6 +479,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       hintText: 'Plan my day, suggest study times...',
                                       hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                                       border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      filled: false,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
                                     ),
                                     onSubmitted: (_) => _handleAsk(),
                                   ),
@@ -510,234 +547,268 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Available Today
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: theme.colorScheme.outline),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'AVAILABLE TODAY',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.5,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF22C55E).withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Text(
-                                '2.5 hrs free',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF22C55E),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(child: _buildBlock(theme, AppColors.primary)),
-                            const SizedBox(width: 4),
-                            Expanded(child: _buildBlock(theme, AppColors.secondary)),
-                            const SizedBox(width: 4),
-                            Expanded(child: _buildBlock(theme, const Color(0xFFF59E0B))),
-                            const SizedBox(width: 4),
-                            Expanded(child: _buildBlock(theme, const Color(0xFF22C55E))),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            _buildLegendItem(AppColors.primary, 'Fixed'),
-                            const SizedBox(width: 12),
-                            _buildLegendItem(AppColors.secondary, 'AI Task'),
-                            const SizedBox(width: 12),
-                            _buildLegendItem(const Color(0xFFF59E0B), 'Break'),
-                            const SizedBox(width: 12),
-                            _buildLegendItem(const Color(0xFF22C55E), 'Free'),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Today's Schedule
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Today\'s Schedule',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => widget.onNavigateToTab(2),
-                        child: const Text(
-                          'View All →',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
                   StreamBuilder<List<ScheduleItem>>(
                     stream: context.read<ScheduleProvider>().getUserScheduleStream(userId, today),
                     builder: (context, snapshot) {
                       final items = snapshot.data ?? [];
-                      if (items.isEmpty) {
-                        return Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainer,
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: theme.colorScheme.outline),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'No events scheduled today',
-                            style: TextStyle(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              fontSize: 14,
+                      
+                      int wakeHour = int.parse(user?.wakeTime.split(':')[0] ?? '7');
+                      int sleepHour = int.parse(user?.sleepTime.split(':')[0] ?? '23');
+                      int totalAwakeMinutes = (sleepHour - wakeHour) * 60;
+                      if (totalAwakeMinutes <= 0) totalAwakeMinutes += 24 * 60;
+                      
+                      int fixedMinutes = items.where((i) => i.isFixed).fold(0, (sum, i) => sum + i.duration.inMinutes);
+                      int aiMinutes = items.where((i) => i.isAISuggested && !i.isFixed).fold(0, (sum, i) => sum + i.duration.inMinutes);
+                      int breakMinutes = items.where((i) => i.type == 'break').fold(0, (sum, i) => sum + i.duration.inMinutes);
+                      
+                      int busyMinutes = fixedMinutes + aiMinutes + breakMinutes;
+                      int freeMinutes = totalAwakeMinutes - busyMinutes;
+                      if (freeMinutes < 0) freeMinutes = 0;
+                      
+                      String freeTimeStr = freeMinutes >= 60 
+                          ? '${(freeMinutes / 60).toStringAsFixed(1)} hrs free' 
+                          : '$freeMinutes mins free';
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Available Today
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainer,
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: theme.colorScheme.outline),
                             ),
-                          ),
-                        );
-                      }
-
-                      items.sort((a, b) => a.startTime.compareTo(b.startTime));
-                      final todayItems = items.take(4).toList();
-
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainer,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: theme.colorScheme.outline),
-                        ),
-                        child: Column(
-                          children: List.generate(todayItems.length, (index) {
-                            final item = todayItems[index];
-                            final timeFormat = DateFormat('h:mm a');
-                            final isLast = index == todayItems.length - 1;
-                            
-                            Color typeColor;
-                            if (item.isFixed) {
-                              typeColor = AppColors.primary;
-                            } else if (item.isAISuggested) {
-                              typeColor = AppColors.secondary;
-                            } else if (item.type == 'break') {
-                              typeColor = const Color(0xFFF59E0B);
-                            } else {
-                              typeColor = const Color(0xFF22C55E);
-                            }
-
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                border: isLast ? null : Border(bottom: BorderSide(color: theme.colorScheme.outline)),
-                              ),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 60,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          timeFormat.format(item.startTime),
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                        Text(
-                                          '${item.duration.inMinutes}m',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Container(
-                                    width: 4,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: typeColor,
-                                      borderRadius: BorderRadius.circular(2),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item.title,
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: theme.colorScheme.onSurface,
-                                          ),
-                                        ),
-                                        if (item.isAISuggested)
-                                          Text(
-                                            '✨ AI scheduled',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w500,
-                                              color: typeColor,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: typeColor.withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      item.isFixed ? 'Fixed' : (item.isAISuggested ? 'AI' : (item.type == 'break' ? 'Break' : 'Personal')),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'AVAILABLE TODAY',
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: typeColor,
+                                        letterSpacing: 1.5,
+                                        color: theme.colorScheme.onSurfaceVariant,
                                       ),
                                     ),
-                                  ),
-                                ],
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        freeTimeStr,
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF22C55E),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    if (fixedMinutes > 0) ...[
+                                      Expanded(flex: fixedMinutes, child: _buildBlock(theme, AppColors.primary)),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    if (aiMinutes > 0) ...[
+                                      Expanded(flex: aiMinutes, child: _buildBlock(theme, AppColors.secondary)),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    if (breakMinutes > 0) ...[
+                                      Expanded(flex: breakMinutes, child: _buildBlock(theme, const Color(0xFFF59E0B))),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    if (freeMinutes > 0) ...[
+                                      Expanded(flex: freeMinutes, child: _buildBlock(theme, const Color(0xFF22C55E))),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    _buildLegendItem(AppColors.primary, 'Fixed'),
+                                    const SizedBox(width: 12),
+                                    _buildLegendItem(AppColors.secondary, 'AI Task'),
+                                    const SizedBox(width: 12),
+                                    _buildLegendItem(const Color(0xFFF59E0B), 'Break'),
+                                    const SizedBox(width: 12),
+                                    _buildLegendItem(const Color(0xFF22C55E), 'Free'),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          // Today's Schedule
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Today\'s Schedule',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  color: theme.colorScheme.onSurface,
+                                ),
                               ),
-                            );
-                          }),
-                        ),
+                              GestureDetector(
+                                onTap: () => widget.onNavigateToTab(2),
+                                child: const Text(
+                                  'View All →',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (items.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surfaceContainer,
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(color: theme.colorScheme.outline),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'No events scheduled today',
+                                style: TextStyle(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            )
+                          else
+                            Builder(
+                              builder: (context) {
+                                final sortedItems = List<ScheduleItem>.from(items)..sort((a, b) => a.startTime.compareTo(b.startTime));
+                                final todayItems = sortedItems.toList();
+
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.surfaceContainer,
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: theme.colorScheme.outline),
+                                  ),
+                                  child: Column(
+                                    children: List.generate(todayItems.length, (index) {
+                                      final item = todayItems[index];
+                                      final timeFormat = DateFormat('h:mm a');
+                                      final isLast = index == todayItems.length - 1;
+                                      
+                                      Color typeColor;
+                                      if (item.isFixed) {
+                                        typeColor = AppColors.primary;
+                                      } else if (item.isAISuggested) {
+                                        typeColor = AppColors.secondary;
+                                      } else if (item.type == 'break') {
+                                        typeColor = const Color(0xFFF59E0B);
+                                      } else {
+                                        typeColor = const Color(0xFF22C55E);
+                                      }
+
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                        decoration: BoxDecoration(
+                                          border: isLast ? null : Border(bottom: BorderSide(color: theme.colorScheme.outline)),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 60,
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.end,
+                                                children: [
+                                                  Text(
+                                                    timeFormat.format(item.startTime),
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: theme.colorScheme.onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    '${item.duration.inMinutes}m',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: theme.colorScheme.onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Container(
+                                              width: 4,
+                                              height: 40,
+                                              decoration: BoxDecoration(
+                                                color: typeColor,
+                                                borderRadius: BorderRadius.circular(2),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    item.title,
+                                                    style: TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: theme.colorScheme.onSurface,
+                                                    ),
+                                                  ),
+                                                  if (item.isAISuggested)
+                                                    Text(
+                                                      '✨ AI scheduled',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.w500,
+                                                        color: typeColor,
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: typeColor.withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              child: Text(
+                                                item.isFixed ? 'Fixed' : (item.isAISuggested ? 'AI' : (item.type == 'break' ? 'Break' : 'Personal')),
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: typeColor,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
                       );
                     },
                   ),
@@ -748,7 +819,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Today\'s Tasks',
+                        'Pending Tasks',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w900,
@@ -773,21 +844,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     stream: context.read<TaskProvider>().getUserTasksStream(userId),
                     builder: (context, snapshot) {
                       final tasks = snapshot.data ?? [];
-                      final todayTasks = tasks.where((t) {
-                        return t.deadline.year == today.year &&
-                            t.deadline.month == today.month &&
-                            t.deadline.day == today.day &&
-                            !t.isCompleted;
-                      }).toList();
+                      final pendingTasks = tasks.where((t) => !t.isCompleted).toList();
 
-                      todayTasks.sort((a, b) => b.priority.compareTo(a.priority));
+                      pendingTasks.sort((a, b) {
+                        if (a.priority != b.priority) {
+                          return b.priority.compareTo(a.priority); // Highest first
+                        }
+                        return a.deadline.compareTo(b.deadline); // Nearest first
+                      });
 
-                      if (todayTasks.isEmpty) {
+                      if (pendingTasks.isEmpty) {
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 32),
                           child: Column(
                             children: [
-                              const Text('🎉', style: TextStyle(fontSize: 32)),
+                              Image.asset('assets/images/timewise_pet.png', width: 64, height: 64),
                               const SizedBox(height: 8),
                               Text(
                                 'All tasks done!',
@@ -810,7 +881,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }
 
                       return Column(
-                        children: todayTasks.take(4).map((task) {
+                        children: pendingTasks.map((task) {
                           final pColor = _getPriorityColor(task.priority);
                           final cColor = _getCategoryColor(task.category);
 
@@ -826,7 +897,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               children: [
                                 GestureDetector(
                                   onTap: () {
-                                    context.read<TaskProvider>().updateTask(task.copyWith(isCompleted: !task.isCompleted));
+                                    if (task.isCompleted) {
+                                      context.read<TaskProvider>().reopenTask(task);
+                                    } else {
+                                      context.read<TaskProvider>().completeTask(task);
+                                    }
                                   },
                                   child: Container(
                                     width: 20,
@@ -844,9 +919,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      if (!task.isCompleted) {
+                                        context.read<FocusProvider>().startFocus(task);
+                                        Navigator.push(context, MaterialPageRoute(builder: (_) => const FocusScreen()));
+                                      }
+                                    },
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
                                       Text(
                                         task.title,
                                         style: TextStyle(
@@ -869,18 +951,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Text(
-                                            '⏱ ${task.estimatedMinutes}m',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                              color: theme.colorScheme.onSurfaceVariant,
+                                          if (task.status == TaskStatus.inProgress)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue.withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                'In Progress',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.blue,
+                                                ),
+                                              ),
+                                            )
+                                          else if (task.status == TaskStatus.overdue)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red.withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                'Overdue',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.red,
+                                                ),
+                                              ),
+                                            )
+                                          else
+                                            Text(
+                                              '⏱ ${task.estimatedMinutes}m',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w500,
+                                                color: theme.colorScheme.onSurfaceVariant,
+                                              ),
                                             ),
-                                          ),
                                         ],
                                       ),
                                     ],
                                   ),
+                                ),
                                 ),
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,

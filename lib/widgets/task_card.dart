@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../models/task.dart';
+import '../providers/focus_provider.dart';
+import '../screens/tasks/focus_screen.dart';
 import '../theme/app_colors.dart';
 
 class TaskCard extends StatefulWidget {
@@ -58,6 +61,18 @@ class _TaskCardState extends State<TaskCard> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (!widget.task.isCompleted) ...[
+                ListTile(
+                  leading: const Icon(Icons.timer_outlined, color: AppColors.primary),
+                  title: const Text('Focus on task', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.read<FocusProvider>().startFocus(widget.task);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const FocusScreen()));
+                  },
+                ),
+                Divider(height: 1, color: theme.colorScheme.outline),
+              ],
               ListTile(
                 leading: Icon(Icons.edit_outlined, color: theme.colorScheme.onSurface),
                 title: Text('Edit task', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold)),
@@ -162,6 +177,22 @@ class _TaskCardState extends State<TaskCard> {
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
+                        if (widget.task.subtasks.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.list, size: 12, color: theme.colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${widget.task.subtasks.where((s) => s.isCompleted).length}/${widget.task.subtasks.length}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
                         if (widget.task.reminderMinutesBefore != null)
                           Icon(Icons.notifications_active, size: 12, color: theme.colorScheme.onSurfaceVariant),
                         if (widget.task.isRecurring)

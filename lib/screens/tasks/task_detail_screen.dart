@@ -302,9 +302,11 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                               setState(() {
                                 _isCompleted = !_isCompleted;
                               });
-                              context.read<TaskProvider>().updateTask(
-                                currentTask.copyWith(isCompleted: _isCompleted),
-                              );
+                              if (_isCompleted) {
+                                context.read<TaskProvider>().completeTask(currentTask);
+                              } else {
+                                context.read<TaskProvider>().reopenTask(currentTask);
+                              }
                             },
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),

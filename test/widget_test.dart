@@ -58,8 +58,9 @@ void main() {
     );
 
     expect(find.text('TimeWise'), findsOneWidget);
-    expect(find.widgetWithText(TextFormField, 'Email'), findsOneWidget);
-    expect(find.widgetWithText(TextFormField, 'Password'), findsOneWidget);
+    expect(find.text('Email'), findsOneWidget);
+    expect(find.text('Password'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNWidgets(2));
     expect(find.widgetWithText(ElevatedButton, 'Sign In'), findsOneWidget);
   });
 

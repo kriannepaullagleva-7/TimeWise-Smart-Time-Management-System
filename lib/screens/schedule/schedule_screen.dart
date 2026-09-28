@@ -7,6 +7,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/task_provider.dart';
 import '../../providers/schedule_provider.dart';
 import '../../models/schedule.dart';
+import '../../models/task.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/schedule_item_card.dart';
 import '../../widgets/empty_state.dart';
@@ -357,51 +358,82 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
             // Schedule List
             Expanded(
-              child: StreamBuilder(
-                stream: context.read<ScheduleProvider>().getUserScheduleStream(
-                  userId,
-                  _selectedDate,
-                ),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+              child: StreamBuilder<List<ScheduleItem>>(
+                stream: context.read<ScheduleProvider>().getUserScheduleStream(userId, _selectedDate),
+                builder: (context, scheduleSnapshot) {
+                  return StreamBuilder<List<Task>>(
+                    stream: context.read<TaskProvider>().getUserTasksStream(userId),
+                    builder: (context, taskSnapshot) {
+                      if (scheduleSnapshot.connectionState == ConnectionState.waiting && taskSnapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
 
-                  if (snapshot.hasError) {
-                    return EmptyState(
-                      icon: Icons.error_outline,
-                      title: 'Could not load schedule',
-                      subtitle: snapshot.error.toString(),
-                    );
-                  }
+                      if (scheduleSnapshot.hasError || taskSnapshot.hasError) {
+                        return EmptyState(
+                          icon: Icons.error_outline,
+                          title: 'Could not load calendar data',
+                          subtitle: scheduleSnapshot.error?.toString() ?? taskSnapshot.error?.toString(),
+                        );
+                      }
 
-                  final schedules = [...?snapshot.data]
-                    ..sort((a, b) => a.startTime.compareTo(b.startTime));
+                      final schedules = [...?scheduleSnapshot.data];
+                      final scheduledTaskIds = schedules.where((s) => s.taskId != null).map((s) => s.taskId!).toSet();
+                      
+                      final tasks = (taskSnapshot.data ?? []).where((t) {
+                        return t.deadline.year == _selectedDate.year &&
+                               t.deadline.month == _selectedDate.month &&
+                               t.deadline.day == _selectedDate.day &&
+                               !scheduledTaskIds.contains(t.id);
+                      });
 
-                  if (schedules.isEmpty) {
-                    return EmptyState(
-                      icon: Icons.calendar_today,
-                      title: 'No schedule for this day',
-                      subtitle: 'Add fixed events or use AI Schedule to plan your day.',
-                      action: ElevatedButton(
-                        onPressed: _addFixedEvent,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Add Event'),
-                      ),
-                    );
-                  }
+                      final combinedItems = [
+                        ...schedules,
+                        ...tasks.map((t) => ScheduleItem(
+                          id: t.id, // We prefix with task_ to avoid ID collisions if any, though UUIDs shouldn't collide
+                          userId: t.userId,
+                          title: t.title,
+                          startTime: t.deadline,
+                          endTime: t.deadline.add(Duration(minutes: t.estimatedMinutes)),
+                          type: 'task',
+                          isFixed: false,
+                          taskId: t.id,
+                        ))
+                      ];
 
-                  return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                    itemCount: schedules.length,
-                    itemBuilder: (context, index) {
-                      final item = schedules[index];
-                      return ScheduleItemCard(
-                        item: item,
-                        onDelete: () => _confirmDeleteScheduleItem(item),
+                      combinedItems.sort((a, b) => a.startTime.compareTo(b.startTime));
+
+                      if (combinedItems.isEmpty) {
+                        return EmptyState(
+                          icon: Icons.calendar_today,
+                          title: 'No schedule for this day',
+                          subtitle: 'Add fixed events or use AI Schedule to plan your day.',
+                          action: ElevatedButton(
+                            onPressed: _addFixedEvent,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: const Text('Add Event'),
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                        itemCount: combinedItems.length,
+                        itemBuilder: (context, index) {
+                          final item = combinedItems[index];
+                          return ScheduleItemCard(
+                            item: item,
+                            onDelete: () {
+                              if (item.type == 'task') {
+                                context.read<TaskProvider>().deleteTask(item.taskId!);
+                              } else {
+                                _confirmDeleteScheduleItem(item);
+                              }
+                            },
+                          );
+                        },
                       );
                     },
                   );

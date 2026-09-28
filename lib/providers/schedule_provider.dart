@@ -4,8 +4,10 @@ import '../models/recurrence.dart';
 import '../models/schedule.dart';
 import '../models/task.dart';
 import '../models/user.dart';
-import '../services/firestore_service.dart';
+import '../repositories/schedule_repository.dart';
+import '../repositories/impl/firestore_schedule_repository.dart';
 import '../services/ai_service.dart';
+import '../utils/app_logger.dart';
 
 /// Thrown when a new/edited schedule item overlaps an existing fixed event.
 class ScheduleConflictException implements Exception {
@@ -16,28 +18,35 @@ class ScheduleConflictException implements Exception {
 }
 
 class ScheduleProvider extends ChangeNotifier {
-  final FirestoreService _firestoreService;
+  static const _module = 'ScheduleProvider';
+
+  final ScheduleRepository _repo;
   final AIService _aiService;
 
   ScheduleProvider({
-    FirestoreService? firestoreService,
+    ScheduleRepository? scheduleRepository,
     AIService? aiService,
-  })  : _firestoreService = firestoreService ?? FirestoreService(),
+  })  : _repo = scheduleRepository ?? FirestoreScheduleRepository(),
         _aiService = aiService ?? AIService();
 
   bool _isLoading = false;
   bool _isGeneratingSchedule = false;
+  String? _errorMessage;
 
   bool get isLoading => _isLoading;
   bool get isGeneratingSchedule => _isGeneratingSchedule;
   bool get isAIConfigured => _aiService.isConfigured;
+  String? get errorMessage => _errorMessage;
+
+  // ── Streams ──────────────────────────────────────────────────────────────
 
   Stream<List<ScheduleItem>> getUserScheduleStream(
     String userId,
     DateTime date,
-  ) {
-    return _firestoreService.getUserSchedule(userId, date);
-  }
+  ) =>
+      _repo.watchDay(userId, date);
+
+  // ── Conflict Check ───────────────────────────────────────────────────────
 
   Future<void> _assertNoFixedConflict(
     String userId,
@@ -45,7 +54,7 @@ class ScheduleProvider extends ChangeNotifier {
     DateTime end, {
     String? excludeItemId,
   }) async {
-    final existing = await _firestoreService.getUserScheduleOnce(userId, start);
+    final existing = await _repo.fetchDay(userId, start);
     final candidate = ScheduleItem(
       id: 'candidate',
       userId: userId,
@@ -70,9 +79,8 @@ class ScheduleProvider extends ChangeNotifier {
         '${two(item.endTime.hour)}:${two(item.endTime.minute)}';
   }
 
-  /// Adds a user-defined fixed activity (class, work, appointment, travel,
-  /// personal commitment). Rejects it if it, or any occurrence when
-  /// [recurrence] repeats it, overlaps anything already on the schedule.
+  // ── Mutations ─────────────────────────────────────────────────────────────
+
   Future<void> addFixedEvent({
     required String userId,
     required String title,
@@ -99,18 +107,18 @@ class ScheduleProvider extends ChangeNotifier {
       );
     }).toList();
 
+    // Validate conflicts before writing anything.
     for (final start in occurrenceStarts) {
       await _assertNoFixedConflict(userId, start, start.add(duration));
     }
 
-    _isLoading = true;
-    notifyListeners();
+    _begin();
     try {
-      final seriesId = _firestoreService.newScheduleId();
+      final seriesId = _repo.newId();
       final items = [
         for (var i = 0; i < occurrenceStarts.length; i++)
           ScheduleItem(
-            id: i == 0 ? seriesId : _firestoreService.newScheduleId(),
+            id: i == 0 ? seriesId : _repo.newId(),
             userId: userId,
             title: title,
             startTime: occurrenceStarts[i],
@@ -123,44 +131,47 @@ class ScheduleProvider extends ChangeNotifier {
       ];
 
       if (items.length == 1) {
-        await _firestoreService.addScheduleItem(items.first);
+        await _repo.add(items.first);
       } else {
-        await _firestoreService.addScheduleItemsBatch(items);
+        await _repo.addBatch(items);
       }
+      AppLogger.info(_module, 'addFixedEvent: ${items.length} occurrence(s)');
+    } catch (e, st) {
+      _setError('Could not save event. Please try again.', e, st);
+      rethrow;
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _end();
     }
   }
 
   Future<void> deleteScheduleItem(String scheduleId) async {
-    _isLoading = true;
-    notifyListeners();
-
+    _begin();
     try {
-      await _firestoreService.deleteScheduleItem(scheduleId);
+      await _repo.delete(scheduleId);
+      AppLogger.info(_module, 'deleteScheduleItem: $scheduleId');
+    } catch (e, st) {
+      _setError('Could not delete event. Please try again.', e, st);
+      rethrow;
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _end();
     }
   }
 
-  /// Deletes every occurrence of the repeating series [recurrenceId]
-  /// belongs to.
   Future<void> deleteScheduleSeries(String recurrenceId) async {
-    _isLoading = true;
-    notifyListeners();
-
+    _begin();
     try {
-      await _firestoreService.deleteScheduleSeries(recurrenceId);
+      await _repo.deleteSeries(recurrenceId);
+      AppLogger.info(_module, 'deleteScheduleSeries: $recurrenceId');
+    } catch (e, st) {
+      _setError('Could not delete event series. Please try again.', e, st);
+      rethrow;
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _end();
     }
   }
 
-  /// Asks the AI for a plan without saving anything, so the caller can show
-  /// a preview and let the user accept, edit, or regenerate it.
+  // ── AI (Future Development) ────────────────────────────────────────────────
+
   Future<List<ScheduleItem>> generateAISchedulePreview({
     required String userId,
     required List<Task> tasks,
@@ -169,11 +180,9 @@ class ScheduleProvider extends ChangeNotifier {
   }) async {
     _isGeneratingSchedule = true;
     notifyListeners();
-
     try {
-      final allItems = await _firestoreService.getUserScheduleOnce(userId, scheduleDate);
+      final allItems = await _repo.fetchDay(userId, scheduleDate);
       final fixedEvents = allItems.where((i) => i.isFixed).toList();
-
       return await _aiService.generateSchedule(
         userId: userId,
         tasks: tasks,
@@ -187,21 +196,17 @@ class ScheduleProvider extends ChangeNotifier {
     }
   }
 
-  /// Persists a (possibly user-edited) generated plan, replacing only the
-  /// previous AI-suggested items for that day so fixed events are kept.
   Future<void> acceptGeneratedSchedule(
     String userId,
     DateTime scheduleDate,
     List<ScheduleItem> items,
   ) async {
-    _isLoading = true;
-    notifyListeners();
-
+    _begin();
     try {
-      await _firestoreService.clearFlexibleSchedule(userId, scheduleDate);
+      await _repo.clearFlexible(userId, scheduleDate);
       for (final item in items) {
         final withId = ScheduleItem(
-          id: _firestoreService.newScheduleId(),
+          id: _repo.newId(),
           userId: item.userId,
           title: item.title,
           startTime: item.startTime,
@@ -212,11 +217,31 @@ class ScheduleProvider extends ChangeNotifier {
           isFixed: false,
           note: item.note,
         );
-        await _firestoreService.addScheduleItem(withId);
+        await _repo.add(withId);
       }
+    } catch (e, st) {
+      _setError('Could not save schedule. Please try again.', e, st);
+      rethrow;
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      _end();
     }
+  }
+
+  // ── State helpers ─────────────────────────────────────────────────────────
+
+  void _begin() {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  void _end() {
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  void _setError(String userMessage, Object error, StackTrace stackTrace) {
+    _errorMessage = userMessage;
+    AppLogger.error(_module, userMessage, error, stackTrace);
   }
 }

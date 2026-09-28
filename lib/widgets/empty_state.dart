@@ -24,7 +24,7 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 64, color: Colors.grey[400]),
+            Image.asset('assets/images/timewise_pet.png', width: 80, height: 80),
             const SizedBox(height: 16),
             Text(
               title,

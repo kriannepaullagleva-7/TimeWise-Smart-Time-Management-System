@@ -31,6 +31,7 @@ class _AddFixedEventScreenState extends State<AddFixedEventScreen> {
   bool _isRecurring = false;
   RecurrenceRule _recurrenceRule = RecurrenceRule.none;
   bool _submitted = false;
+  bool _isSaving = false;
 
   final List<String> _categories = [
     ScheduleTypes.class_,
@@ -114,8 +115,11 @@ class _AddFixedEventScreenState extends State<AddFixedEventScreen> {
   }
 
   Future<void> _save() async {
+    if (_isSaving) return;
     final title = _titleController.text.trim();
     if (title.isEmpty) return;
+
+    setState(() => _isSaving = true);
 
     final start = _combine(_startTime);
     final end = _combine(_endTime);
@@ -150,6 +154,7 @@ class _AddFixedEventScreenState extends State<AddFixedEventScreen> {
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.toString()), backgroundColor: const Color(0xFFEF4444)),
         );
@@ -466,13 +471,19 @@ class _AddFixedEventScreenState extends State<AddFixedEventScreen> {
                         color: Colors.transparent,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: _titleController.text.trim().isNotEmpty ? _save : null,
+                          onTap: _titleController.text.trim().isNotEmpty && !_isSaving && !_submitted ? _save : null,
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             alignment: Alignment.center,
-                            child: Text(
-                              'Save Schedule',
-                              style: TextStyle(
+                            child: _isSaving 
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : Text(
+                                    'Save Schedule',
+                                    style: TextStyle(
                                 color: _titleController.text.trim().isNotEmpty ? Colors.white : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                                 fontSize: 16,
                                 fontWeight: FontWeight.w900,

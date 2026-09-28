@@ -1,13 +1,15 @@
 import 'dart:io';
 
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_storage/firebase_storage.dart' hide Task;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/user.dart';
+import '../models/task.dart';
 import '../providers/auth_provider.dart';
+import '../providers/task_provider.dart';
 import '../theme/app_colors.dart';
 import 'appearance_screen.dart';
 
@@ -297,14 +299,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 24),
 
                   // Productivity Stats
-                  Row(
-                    children: [
-                      Expanded(child: _buildStatCard('🔥', '87%', 'Completion')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _buildStatCard('🎯', '7', 'Day Streak')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _buildStatCard('⏱️', '24h', 'Focus Time')),
-                    ],
+                  StreamBuilder<List<Task>>(
+                    stream: context.read<TaskProvider>().getUserTasksStream(user.uid),
+                    builder: (context, snapshot) {
+                      final tasks = snapshot.data ?? [];
+                      final streak = context.read<TaskProvider>().calculateStreak(tasks);
+                      final completedCount = tasks.where((t) => t.isCompleted).length;
+                      final totalCount = tasks.length;
+                      final completionRate = totalCount == 0 ? 0 : ((completedCount / totalCount) * 100).round();
+                      
+                      // Calculate focus time (estimate based on completed tasks)
+                      final focusMinutes = tasks.where((t) => t.isCompleted).fold(0, (sum, t) => sum + t.estimatedMinutes);
+                      final focusHours = (focusMinutes / 60).toStringAsFixed(1);
+                      
+                      return Row(
+                        children: [
+                          Expanded(child: _buildStatCard('🔥', '$completionRate%', 'Completion')),
+                          const SizedBox(width: 8),
+                          Expanded(child: _buildStatCard('🎯', '$streak', 'Day Streak')),
+                          const SizedBox(width: 8),
+                          Expanded(child: _buildStatCard('⏱️', '${focusHours}h', 'Focus Time')),
+                        ],
+                      );
+                    }
                   ),
                   const SizedBox(height: 24),
 
@@ -384,6 +401,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _buildDivider(),
                         _buildNavRow('Log Out', '', icon: '🚪', isDanger: true, onTap: () async {
                           await context.read<AuthProvider>().signOut();
+                          if (context.mounted) {
+                            Navigator.of(context).popUntil((route) => route.isFirst);
+                          }
                         }, isLast: true),
                       ],
                     ),
