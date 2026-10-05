@@ -1,24 +1,52 @@
 rules_version = '2';
 
+// Every document belongs to exactly one user (`userId` / the users/{uid} id).
+// Rules are not filters: the app always queries with `userId == uid`.
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsExisting() {
+      return signedIn() && request.auth.uid == resource.data.userId;
+    }
+
+    function createsOwn() {
+      return signedIn() && request.auth.uid == request.resource.data.userId;
+    }
+
+    // An update may not hand the document to another user.
+    function keepsOwner() {
+      return request.resource.data.userId == resource.data.userId;
+    }
+
+    function shortText(field, max) {
+      return request.resource.data[field] is string
+        && request.resource.data[field].size() > 0
+        && request.resource.data[field].size() <= max;
+    }
+
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn() && request.auth.uid == userId
+        && request.resource.data.uid == userId;
+      allow delete: if false;
     }
 
     match /tasks/{taskId} {
-      allow read, update, delete: if request.auth != null
-        && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null
-        && request.auth.uid == request.resource.data.userId;
+      allow read: if ownsExisting();
+      allow create: if createsOwn() && shortText('title', 200);
+      allow update: if ownsExisting() && keepsOwner() && shortText('title', 200);
+      allow delete: if ownsExisting();
     }
 
     match /schedules/{scheduleId} {
-      allow read, update, delete: if request.auth != null
-        && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null
-        && request.auth.uid == request.resource.data.userId;
+      allow read: if ownsExisting();
+      allow create: if createsOwn() && shortText('title', 200);
+      allow update: if ownsExisting() && keepsOwner() && shortText('title', 200);
+      allow delete: if ownsExisting();
     }
   }
 }

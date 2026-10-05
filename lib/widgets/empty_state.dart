@@ -1,43 +1,51 @@
 import 'package:flutter/material.dart';
 
-/// Shared empty-state placeholder used across Tasks, Schedule and Dashboard
-/// so the "nothing here yet" look stays consistent everywhere.
+import '../theme/app_styles.dart';
+
+/// Shared empty / error placeholder used across Tasks, Calendar and the AI
+/// review so "nothing here" and "something failed" look the same everywhere.
 class EmptyState extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final String title;
   final String? subtitle;
   final Widget? action;
+  final bool compact;
 
   const EmptyState({
-    required this.icon,
+    this.icon,
     required this.title,
     this.subtitle,
     this.action,
+    this.compact = false,
     super.key,
   });
 
   @override
   Widget build(BuildContext context) {
+    final size = compact ? 56.0 : 80.0;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset('assets/images/timewise_pet.png', width: 80, height: 80),
+            if (icon == null)
+              Image.asset('assets/images/timewise_pet.png', width: size, height: size, excludeFromSemantics: true)
+            else
+              Container(
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  color: context.primary.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: size * 0.45, color: context.primary),
+              ),
             const SizedBox(height: 16),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
+            Text(title, style: context.h3, textAlign: TextAlign.center),
             if (subtitle != null) ...[
               const SizedBox(height: 8),
-              Text(
-                subtitle!,
-                style: TextStyle(color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
+              Text(subtitle!, style: context.bodyMuted, textAlign: TextAlign.center),
             ],
             if (action != null) ...[
               const SizedBox(height: 16),

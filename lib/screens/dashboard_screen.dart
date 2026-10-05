@@ -1,1045 +1,247 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
-import '../../providers/auth_provider.dart';
-import '../../providers/task_provider.dart';
-import '../../providers/schedule_provider.dart';
-import '../../models/task.dart';
-import '../../models/schedule.dart';
+import '../models/schedule.dart';
+import '../models/task.dart';
+import '../providers/auth_provider.dart';
+import '../providers/preferences_provider.dart';
+import '../providers/schedule_provider.dart';
+import '../providers/task_provider.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_styles.dart';
+import '../utils/day_usage.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/schedule_item_card.dart';
+import '../widgets/task_actions.dart';
+import '../widgets/task_card.dart';
+import '../widgets/ui.dart';
+import 'schedule/add_fixed_event_screen.dart';
+import 'schedule/ai_schedule_flow.dart';
 import 'tasks/add_task_screen.dart';
-import 'tasks/focus_screen.dart';
-import '../providers/focus_provider.dart';
+import 'tasks/task_detail_screen.dart';
 
-class DashboardScreen extends StatefulWidget {
-  final Function(int) onNavigateToTab;
+/// Home tab: today's progress, the AI planner, quick actions, today's
+/// schedule and the most urgent pending tasks.
+class DashboardScreen extends StatelessWidget {
+  final ValueChanged<int> onNavigateToTab;
 
   const DashboardScreen({super.key, required this.onNavigateToTab});
 
-  @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends State<DashboardScreen> {
-  final TextEditingController _aiController = TextEditingController();
-  bool _aiLoading = false;
-  String _aiReply = '';
-
-  final List<String> _aiReplies = [
-    "I've analyzed your tasks. I suggest studying Research Paper from 10:45 AM – 12:15 PM during your peak focus window, then Flutter Project at 3:15 PM after your class.",
-    "Based on your schedule, you have 2.5 hours free this afternoon. I recommend tackling Math Problem Set at 9:30 PM after your lab session ends.",
-    "You have 3 high-priority tasks due tomorrow. Your most productive block is 10 AM – 12 PM — I've reserved it for Research Paper.",
-  ];
-
-  @override
-  void dispose() {
-    _aiController.dispose();
-    super.dispose();
-  }
-
-  void _handleAsk() {
-    if (_aiController.text.trim().isEmpty) return;
-    setState(() {
-      _aiLoading = true;
-      _aiReply = '';
-    });
-    Future.delayed(const Duration(milliseconds: 1200), () {
-      if (mounted) {
-        setState(() {
-          _aiReply = _aiReplies[math.Random().nextInt(_aiReplies.length)];
-          _aiLoading = false;
-        });
-      }
-    });
-  }
-
-  Color _getPriorityColor(int priority) {
-    switch (priority) {
-      case 3:
-        return const Color(0xFFEF4444);
-      case 2:
-        return const Color(0xFFF59E0B);
-      case 1:
-      default:
-        return const Color(0xFF10B981);
-    }
-  }
-
-  Color _getCategoryColor(String category) {
-    if (category.toLowerCase() == 'school') return const Color(0xFF6366F1);
-    if (category.toLowerCase() == 'work') return const Color(0xFF0EA5E9);
-    if (category.toLowerCase() == 'personal') return const Color(0xFF10B981);
-    return const Color(0xFF8B5CF6);
+  static String greeting(DateTime now) {
+    if (now.hour < 12) return 'Good morning';
+    if (now.hour < 18) return 'Good afternoon';
+    return 'Good evening';
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final user = context.read<AuthProvider>().currentUser;
-    final userId = user?.uid ?? '';
-    final today = DateTime.now();
-    final dayName = DateFormat('EEEE').format(today);
-    final dateStr = DateFormat('MMMM d').format(today);
+    final user = context.watch<AuthProvider>().currentUser;
+    final taskProvider = context.watch<TaskProvider>();
+    final now = DateTime.now();
+    final firstName = (user?.name ?? '').trim().split(' ').first;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
-      body: Stack(
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: () async => taskProvider.retry(),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.page, 20, AppSpacing.page, 24),
+            children: [
+              _Header(
+                greeting: '${greeting(now)}${firstName.isEmpty ? '' : ', $firstName'}',
+                date: DateFormat('EEEE, MMMM d').format(now),
+                streak: taskProvider.calculateStreak(taskProvider.tasks),
+              ),
+              const SizedBox(height: 20),
+              if (taskProvider.streamError != null)
+                _LoadError(onRetry: taskProvider.retry)
+              else if (!taskProvider.isLoaded)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 80),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else ...[
+                _ProgressRow(tasks: taskProvider.tasks, now: now),
+                const SizedBox(height: 16),
+                if (context.watch<PreferencesProvider>().aiSuggestions) ...[
+                  _AiCard(tasks: taskProvider.tasks, now: now),
+                  const SizedBox(height: 20),
+                ],
+                _QuickActions(onNavigateToTab: onNavigateToTab),
+                const SizedBox(height: 24),
+                if (user != null) _TodaySchedule(userId: user.uid, onViewAll: () => onNavigateToTab(2)),
+                const SizedBox(height: 24),
+                _PendingTasks(tasks: taskProvider.tasks, onViewAll: () => onNavigateToTab(1)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  final String greeting;
+  final String date;
+  final int streak;
+
+  const _Header({required this.greeting, required this.date, required this.streak});
+
+  @override
+  Widget build(BuildContext context) {
+    final amber = readableOn(AppColors.warning, context.cs.surface);
+    return Row(
+      children: [
+        Image.asset('assets/images/timewise_pet.png', width: 48, height: 48, excludeFromSemantics: true),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(date, style: context.label),
+              const SizedBox(height: 2),
+              Text(greeting, style: context.h1.copyWith(fontSize: 20), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+        Semantics(
+          label: '$streak day streak',
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.local_fire_department, size: 18, color: amber),
+                const SizedBox(width: 4),
+                Text('$streak', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: amber)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProgressRow extends StatelessWidget {
+  final List<Task> tasks;
+  final DateTime now;
+
+  const _ProgressRow({required this.tasks, required this.now});
+
+  @override
+  Widget build(BuildContext context) {
+    final todayTasks = tasks
+        .where((t) => t.deadline.year == now.year && t.deadline.month == now.month && t.deadline.day == now.day)
+        .toList();
+    final done = todayTasks.where((t) => t.isCompleted).length;
+    final total = todayTasks.length;
+    final streak = context.read<TaskProvider>().calculateStreak(tasks, now: now);
+
+    final today = DateTime(now.year, now.month, now.day);
+    final monday = DateTime(today.year, today.month, today.day - (today.weekday - 1));
+    final days = TaskProvider.completionDays(tasks);
+    final amber = readableOn(AppColors.warning, context.cs.surfaceContainer);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Background Gradient
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 250,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(0, -1.2),
-                  radius: 1.5,
-                  colors: [
-                    AppColors.primary.withValues(alpha: 0.22),
-                    Colors.transparent,
-                  ],
-                  stops: const [0.0, 0.7],
-                ),
+          Expanded(
+            child: AppCard(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 52,
+                    height: 52,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox.expand(
+                          child: CircularProgressIndicator(
+                            value: total == 0 ? 0 : done / total,
+                            backgroundColor: context.cs.outline,
+                            strokeWidth: 5,
+                          ),
+                        ),
+                        Text(
+                          total == 0 ? '–' : '${((done / total) * 100).round()}%',
+                          style: context.body.copyWith(fontSize: 12, fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('TODAY', style: context.caption.copyWith(letterSpacing: 1.2)),
+                        const SizedBox(height: 2),
+                        Text(
+                          total == 0 ? 'No tasks due' : '$done of $total done',
+                          style: context.body.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          
-          SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 100),
+          const SizedBox(width: 12),
+          Expanded(
+            child: AppCard(
+              padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Greeting
+                  Text('STREAK', style: context.caption.copyWith(letterSpacing: 1.2)),
+                  const SizedBox(height: 4),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
                     children: [
-                      Image.asset(
-                        'assets/images/timewise_pet.png',
-                        width: 48,
-                        height: 48,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '$dayName, $dateStr',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Good afternoon, ${user?.name.split(' ').first ?? 'User'} 👋',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: theme.colorScheme.onSurface,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      StreamBuilder<List<Task>>(
-                        stream: context.read<TaskProvider>().getUserTasksStream(userId),
-                        builder: (context, snapshot) {
-                          final streak = context.read<TaskProvider>().calculateStreak(snapshot.data ?? []);
-                          return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
-                              border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.2)),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text('🔥', style: TextStyle(fontSize: 14)),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '$streak',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w900,
-                                    color: Color(0xFFFCD34D),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                      ),
+                      Text('$streak', style: context.h1.copyWith(fontSize: 26, height: 1)),
+                      const SizedBox(width: 4),
+                      Text('day${streak == 1 ? '' : 's'}', style: context.label.copyWith(color: amber)),
                     ],
                   ),
-                  const SizedBox(height: 20),
-
-                  // Progress + Streak row
-                  StreamBuilder<List<Task>>(
-                    stream: context.read<TaskProvider>().getUserTasksStream(userId),
-                    builder: (context, snapshot) {
-                      final tasks = snapshot.data ?? [];
-                      final todayTasks = tasks.where((t) {
-                        return t.deadline.year == today.year &&
-                            t.deadline.month == today.month &&
-                            t.deadline.day == today.day;
-                      }).toList();
-                      
-                      final completed = todayTasks.where((t) => t.isCompleted).length;
-                      final total = todayTasks.length;
-                      final pct = total == 0 ? 0 : ((completed / total) * 100).round();
-
-                      // Calculate Streak
-                      int streak = context.read<TaskProvider>().calculateStreak(tasks);
-                      
-                      final completedDates = tasks
-                          .where((t) => t.isCompleted)
-                          .map((t) {
-                            final date = t.completedAt ?? t.deadline;
-                            return DateTime(date.year, date.month, date.day);
-                          })
-                          .toSet()
-                          .toList();
-                          
-                      final todayDate = DateTime(today.year, today.month, today.day);
-
-                      // Calculate weekly active days (Mon to Sun)
-                      final currentWeekday = todayDate.weekday; // 1 = Mon, 7 = Sun
-                      final startOfWeek = todayDate.subtract(Duration(days: currentWeekday - 1));
-
-                      return Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceContainer,
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(color: theme.colorScheme.outline),
-                              ),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 52,
-                                    height: 52,
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        CircularProgressIndicator(
-                                          value: total == 0 ? 0 : (completed / total),
-                                          backgroundColor: theme.colorScheme.outline,
-                                          color: AppColors.primary,
-                                          strokeWidth: 5,
-                                        ),
-                                        Text(
-                                          '$pct%',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w900,
-                                            color: theme.colorScheme.onSurface,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'TODAY',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 1.5,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          '$completed/$total Tasks',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w900,
-                                            color: theme.colorScheme.onSurface,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          'Completed',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w500,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceContainer,
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(color: theme.colorScheme.outline),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'STREAK',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.5,
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        '$streak',
-                                        style: TextStyle(
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.w900,
-                                          color: theme.colorScheme.onSurface,
-                                          height: 1,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      const Text(
-                                        '🔥 days',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFFF59E0B),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].asMap().entries.map((entry) {
-                                      int idx = entry.key;
-                                      String d = entry.value;
-                                      final checkDay = startOfWeek.add(Duration(days: idx));
-                                      bool active = completedDates.contains(checkDay);
-                                      return Expanded(
-                                        child: Column(
-                                          children: [
-                                            Container(
-                                              height: 6,
-                                              margin: const EdgeInsets.symmetric(horizontal: 1),
-                                              decoration: BoxDecoration(
-                                                color: active ? const Color(0xFFF59E0B) : theme.colorScheme.outline,
-                                                borderRadius: BorderRadius.circular(3),
-                                              ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              d,
-                                              style: TextStyle(
-                                                fontSize: 9,
-                                                color: theme.colorScheme.onSurfaceVariant,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20),
-
-                  // AI Assistant Card
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: AppColors.btnGradient,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.18),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                alignment: Alignment.center,
-                                child: const Text('✨', style: TextStyle(fontSize: 14)),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'AI ASSISTANT',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 1.5,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          
-                          if (_aiReply.isNotEmpty) ...[
-                            Text(
-                              _aiReply,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                                height: 1.5,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton(
-                                    onPressed: () => widget.onNavigateToTab(2),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.white.withValues(alpha: 0.22),
-                                      foregroundColor: Colors.white,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                    ),
-                                    child: const Text('Add to Schedule', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                TextButton(
-                                  onPressed: () => setState(() { _aiReply = ''; _aiController.clear(); }),
-                                  style: TextButton.styleFrom(
-                                    backgroundColor: Colors.white.withValues(alpha: 0.12),
-                                    foregroundColor: Colors.white.withValues(alpha: 0.75),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                  ),
-                                  child: const Text('Clear', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-                                ),
-                              ],
-                            ),
-                          ] else ...[
-                            const Text(
-                              'You have 3 high-priority tasks due tomorrow. Ask me to help plan your day.',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: TextField(
-                                    controller: _aiController,
-                                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                                    decoration: InputDecoration(
-                                      hintText: 'Plan my day, suggest study times...',
-                                      hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-                                      border: InputBorder.none,
-                                      enabledBorder: InputBorder.none,
-                                      focusedBorder: InputBorder.none,
-                                      filled: false,
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-                                    ),
-                                    onSubmitted: (_) => _handleAsk(),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: _handleAsk,
-                                child: Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.22),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: _aiLoading
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                        )
-                                      : const Icon(Icons.send_rounded, color: Colors.white, size: 16),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Quick Actions
-                  Text(
-                    'Quick Actions',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
-                      _buildQuickAction(context, '✅', 'Add Task', () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const AddTaskScreen()));
-                      }),
-                      const SizedBox(width: 8),
-                      _buildQuickAction(context, '📅', 'Schedule', () {
-                        widget.onNavigateToTab(2); // Go to schedule
-                      }),
-                      const SizedBox(width: 8),
-                      _buildQuickAction(context, '📆', 'Calendar', () {
-                        widget.onNavigateToTab(2);
-                      }),
-                      const SizedBox(width: 8),
-                      _buildQuickAction(context, '👤', 'Profile', () {
-                        widget.onNavigateToTab(3);
-                      }),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  StreamBuilder<List<ScheduleItem>>(
-                    stream: context.read<ScheduleProvider>().getUserScheduleStream(userId, today),
-                    builder: (context, snapshot) {
-                      final items = snapshot.data ?? [];
-                      
-                      int wakeHour = int.parse(user?.wakeTime.split(':')[0] ?? '7');
-                      int sleepHour = int.parse(user?.sleepTime.split(':')[0] ?? '23');
-                      int totalAwakeMinutes = (sleepHour - wakeHour) * 60;
-                      if (totalAwakeMinutes <= 0) totalAwakeMinutes += 24 * 60;
-                      
-                      int fixedMinutes = items.where((i) => i.isFixed).fold(0, (sum, i) => sum + i.duration.inMinutes);
-                      int aiMinutes = items.where((i) => i.isAISuggested && !i.isFixed).fold(0, (sum, i) => sum + i.duration.inMinutes);
-                      int breakMinutes = items.where((i) => i.type == 'break').fold(0, (sum, i) => sum + i.duration.inMinutes);
-                      
-                      int busyMinutes = fixedMinutes + aiMinutes + breakMinutes;
-                      int freeMinutes = totalAwakeMinutes - busyMinutes;
-                      if (freeMinutes < 0) freeMinutes = 0;
-                      
-                      String freeTimeStr = freeMinutes >= 60 
-                          ? '${(freeMinutes / 60).toStringAsFixed(1)} hrs free' 
-                          : '$freeMinutes mins free';
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Available Today
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainer,
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(color: theme.colorScheme.outline),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'AVAILABLE TODAY',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 1.5,
-                                        color: theme.colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF22C55E).withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        freeTimeStr,
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF22C55E),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    if (fixedMinutes > 0) ...[
-                                      Expanded(flex: fixedMinutes, child: _buildBlock(theme, AppColors.primary)),
-                                      const SizedBox(width: 4),
-                                    ],
-                                    if (aiMinutes > 0) ...[
-                                      Expanded(flex: aiMinutes, child: _buildBlock(theme, AppColors.secondary)),
-                                      const SizedBox(width: 4),
-                                    ],
-                                    if (breakMinutes > 0) ...[
-                                      Expanded(flex: breakMinutes, child: _buildBlock(theme, const Color(0xFFF59E0B))),
-                                      const SizedBox(width: 4),
-                                    ],
-                                    if (freeMinutes > 0) ...[
-                                      Expanded(flex: freeMinutes, child: _buildBlock(theme, const Color(0xFF22C55E))),
-                                    ],
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    _buildLegendItem(AppColors.primary, 'Fixed'),
-                                    const SizedBox(width: 12),
-                                    _buildLegendItem(AppColors.secondary, 'AI Task'),
-                                    const SizedBox(width: 12),
-                                    _buildLegendItem(const Color(0xFFF59E0B), 'Break'),
-                                    const SizedBox(width: 12),
-                                    _buildLegendItem(const Color(0xFF22C55E), 'Free'),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          
-                          // Today's Schedule
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Today\'s Schedule',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => widget.onNavigateToTab(2),
-                                child: const Text(
-                                  'View All →',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (items.isEmpty)
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceContainer,
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(color: theme.colorScheme.outline),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                'No events scheduled today',
-                                style: TextStyle(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            )
-                          else
-                            Builder(
-                              builder: (context) {
-                                final sortedItems = List<ScheduleItem>.from(items)..sort((a, b) => a.startTime.compareTo(b.startTime));
-                                final todayItems = sortedItems.toList();
-
-                                return Container(
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.surfaceContainer,
-                                    borderRadius: BorderRadius.circular(24),
-                                    border: Border.all(color: theme.colorScheme.outline),
-                                  ),
-                                  child: Column(
-                                    children: List.generate(todayItems.length, (index) {
-                                      final item = todayItems[index];
-                                      final timeFormat = DateFormat('h:mm a');
-                                      final isLast = index == todayItems.length - 1;
-                                      
-                                      Color typeColor;
-                                      if (item.isFixed) {
-                                        typeColor = AppColors.primary;
-                                      } else if (item.isAISuggested) {
-                                        typeColor = AppColors.secondary;
-                                      } else if (item.type == 'break') {
-                                        typeColor = const Color(0xFFF59E0B);
-                                      } else {
-                                        typeColor = const Color(0xFF22C55E);
-                                      }
-
-                                      return Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                        decoration: BoxDecoration(
-                                          border: isLast ? null : Border(bottom: BorderSide(color: theme.colorScheme.outline)),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            SizedBox(
-                                              width: 60,
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.end,
-                                                children: [
-                                                  Text(
-                                                    timeFormat.format(item.startTime),
-                                                    style: TextStyle(
-                                                      fontSize: 11,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: theme.colorScheme.onSurfaceVariant,
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    '${item.duration.inMinutes}m',
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                      color: theme.colorScheme.onSurfaceVariant,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Container(
-                                              width: 4,
-                                              height: 40,
-                                              decoration: BoxDecoration(
-                                                color: typeColor,
-                                                borderRadius: BorderRadius.circular(2),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    item.title,
-                                                    style: TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: theme.colorScheme.onSurface,
-                                                    ),
-                                                  ),
-                                                  if (item.isAISuggested)
-                                                    Text(
-                                                      '✨ AI scheduled',
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.w500,
-                                                        color: typeColor,
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: typeColor.withValues(alpha: 0.12),
-                                                borderRadius: BorderRadius.circular(12),
-                                              ),
-                                              child: Text(
-                                                item.isFixed ? 'Fixed' : (item.isAISuggested ? 'AI' : (item.type == 'break' ? 'Break' : 'Personal')),
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: typeColor,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }),
-                                  ),
-                                );
-                              },
-                            ),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Today's Tasks
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Pending Tasks',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => widget.onNavigateToTab(1), // Go to Tasks
-                        child: const Text(
-                          'View All →',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  StreamBuilder<List<Task>>(
-                    stream: context.read<TaskProvider>().getUserTasksStream(userId),
-                    builder: (context, snapshot) {
-                      final tasks = snapshot.data ?? [];
-                      final pendingTasks = tasks.where((t) => !t.isCompleted).toList();
-
-                      pendingTasks.sort((a, b) {
-                        if (a.priority != b.priority) {
-                          return b.priority.compareTo(a.priority); // Highest first
-                        }
-                        return a.deadline.compareTo(b.deadline); // Nearest first
-                      });
-
-                      if (pendingTasks.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 32),
+                      for (var i = 0; i < 7; i++)
+                        Expanded(
                           child: Column(
                             children: [
-                              Image.asset('assets/images/timewise_pet.png', width: 64, height: 64),
-                              const SizedBox(height: 8),
-                              Text(
-                                'All tasks done!',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.onSurface,
+                              Container(
+                                height: 6,
+                                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                                decoration: BoxDecoration(
+                                  color: days.contains(DateTime(monday.year, monday.month, monday.day + i))
+                                      ? AppColors.warning
+                                      : context.cs.outline,
+                                  borderRadius: BorderRadius.circular(3),
                                 ),
                               ),
+                              const SizedBox(height: 3),
                               Text(
-                                'Great job today.',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
+                                'MTWTFSS'[i],
+                                style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
                               ),
                             ],
                           ),
-                        );
-                      }
-
-                      return Column(
-                        children: pendingTasks.map((task) {
-                          final pColor = _getPriorityColor(task.priority);
-                          final cColor = _getCategoryColor(task.category);
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainer,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: theme.colorScheme.outline),
-                            ),
-                            child: Row(
-                              children: [
-                                GestureDetector(
-                                  onTap: () {
-                                    if (task.isCompleted) {
-                                      context.read<TaskProvider>().reopenTask(task);
-                                    } else {
-                                      context.read<TaskProvider>().completeTask(task);
-                                    }
-                                  },
-                                  child: Container(
-                                    width: 20,
-                                    height: 20,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: pColor, width: 2),
-                                      color: task.isCompleted ? pColor : Colors.transparent,
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: task.isCompleted
-                                        ? const Icon(Icons.check, size: 12, color: Colors.white)
-                                        : null,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      if (!task.isCompleted) {
-                                        context.read<FocusProvider>().startFocus(task);
-                                        Navigator.push(context, MaterialPageRoute(builder: (_) => const FocusScreen()));
-                                      }
-                                    },
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                      Text(
-                                        task.title,
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: theme.colorScheme.onSurface,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Row(
-                                        children: [
-                                          Text(
-                                            DateFormat('MMM d').format(task.deadline),
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                              color: theme.colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          if (task.status == TaskStatus.inProgress)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: Colors.blue.withValues(alpha: 0.1),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                'In Progress',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.blue,
-                                                ),
-                                              ),
-                                            )
-                                          else if (task.status == TaskStatus.overdue)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: Colors.red.withValues(alpha: 0.1),
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                'Overdue',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.red,
-                                                ),
-                                              ),
-                                            )
-                                          else
-                                            Text(
-                                              '⏱ ${task.estimatedMinutes}m',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w500,
-                                                color: theme.colorScheme.onSurfaceVariant,
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: pColor.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        task.priorityText,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: pColor,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: cColor.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        task.category,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: cColor,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      );
-                    },
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -1049,70 +251,358 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
 
-  Widget _buildQuickAction(BuildContext context, String emoji, String label, VoidCallback onTap) {
-    final theme = Theme.of(context);
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: theme.colorScheme.outline),
-          ),
-          child: Column(
+/// Entry point to the AI planner. States the situation from the real task
+/// list and starts the real planner (no canned text).
+class _AiCard extends StatelessWidget {
+  final List<Task> tasks;
+  final DateTime now;
+
+  const _AiCard({required this.tasks, required this.now});
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    final pending = TaskProvider.collapseSeries(tasks.where((t) => !t.isCompleted).toList(), now: now);
+    final overdue = pending.where((t) => t.deadline.isBefore(now)).length;
+    final dueToday = pending.where((t) => !t.deadline.isBefore(now) && t.deadline.isBefore(tomorrow)).length;
+    final highPriority = pending.where((t) => t.priority == 3).length;
+
+    final String message;
+    if (pending.isEmpty) {
+      message = 'You have nothing pending. Add a task and I will plan your time around your fixed events.';
+    } else {
+      final parts = <String>[
+        '${pending.length} pending task${pending.length == 1 ? '' : 's'}',
+        if (overdue > 0) '$overdue overdue',
+        if (dueToday > 0) '$dueToday due today',
+        if (highPriority > 0) '$highPriority high priority',
+      ];
+      message = '${parts.join(' · ')}. Let the AI fit them around your fixed events and sleep.';
+    }
+
+    const onCard = Colors.white;
+    return Container(
+      decoration: BoxDecoration(gradient: AppColors.aiGradient, borderRadius: BorderRadius.circular(AppRadius.lg)),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text(emoji, style: const TextStyle(fontSize: 20)),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onSurface,
-                  height: 1.1,
-                ),
-                textAlign: TextAlign.center,
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.auto_awesome, size: 18, color: onCard),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'AI SCHEDULE',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.4, color: onCard),
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          Text(message, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.45, color: onCard)),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _CardButton(
+                  label: 'Plan today',
+                  filled: true,
+                  onPressed: () => startAiScheduleFlow(context, today),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _CardButton(
+                  label: 'Plan tomorrow',
+                  filled: false,
+                  onPressed: () => startAiScheduleFlow(context, tomorrow),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CardButton extends StatelessWidget {
+  final String label;
+  final bool filled;
+  final VoidCallback onPressed;
+
+  const _CardButton({required this.label, required this.filled, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm));
+    return SizedBox(
+      height: 48,
+      child: filled
+          ? FilledButton(
+              onPressed: onPressed,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF003DA5),
+                shape: shape,
+                textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+              child: Text(label),
+            )
+          : OutlinedButton(
+              onPressed: onPressed,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white, width: 1.5),
+                shape: shape,
+                textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+              child: Text(label),
+            ),
+    );
+  }
+}
+
+class _QuickActions extends StatelessWidget {
+  final ValueChanged<int> onNavigateToTab;
+
+  const _QuickActions({required this.onNavigateToTab});
+
+  @override
+  Widget build(BuildContext context) {
+    void push(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+
+    Widget action(IconData icon, String label, VoidCallback onTap) {
+      return Expanded(
+        child: AppCard(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          radius: AppRadius.md,
+          onTap: onTap,
+          child: Column(
+            children: [
+              Icon(icon, size: 24, color: context.primary),
+              const SizedBox(height: 6),
+              Text(label, style: context.label.copyWith(color: context.cs.onSurface), textAlign: TextAlign.center),
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
-  Widget _buildBlock(ThemeData theme, Color color) {
-    return Container(
-      height: 16,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
-      ),
-    );
-  }
-
-  Widget _buildLegendItem(Color color, String label) {
     return Row(
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        action(Icons.add_task, 'Add task', () => push(const AddTaskScreen())),
+        const SizedBox(width: 8),
+        action(Icons.event_available_outlined, 'Add event', () => push(AddFixedEventScreen(date: DateTime.now()))),
+        const SizedBox(width: 8),
+        action(Icons.calendar_month_outlined, 'Calendar', () => onNavigateToTab(2)),
+        const SizedBox(width: 8),
+        action(Icons.checklist_rtl, 'Tasks', () => onNavigateToTab(1)),
       ],
+    );
+  }
+}
+
+/// Free-time bar and today's schedule. Owns its Firestore stream so rebuilds
+/// of the dashboard do not restart the query.
+class _TodaySchedule extends StatefulWidget {
+  final String userId;
+  final VoidCallback onViewAll;
+
+  const _TodaySchedule({required this.userId, required this.onViewAll});
+
+  @override
+  State<_TodaySchedule> createState() => _TodayScheduleState();
+}
+
+class _TodayScheduleState extends State<_TodaySchedule> {
+  late final Stream<List<ScheduleItem>> _stream =
+      context.read<ScheduleProvider>().watchDay(widget.userId, DateTime.now());
+
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().currentUser;
+    return StreamBuilder<List<ScheduleItem>>(
+      stream: _stream,
+      builder: (context, snapshot) {
+        final items = [...?snapshot.data]..sort((a, b) => a.startTime.compareTo(b.startTime));
+        final usage = DayUsage.compute(
+          items,
+          DateTime.now(),
+          wakeMinutes: user?.wakeMinutes ?? 7 * 60,
+          sleepMinutes: user?.sleepMinutes ?? 23 * 60,
+        );
+        final free = usage.freeMinutes < 0 ? 0 : usage.freeMinutes;
+        final freeText = free >= 60 ? '${(free / 60).toStringAsFixed(1)} h free' : '$free min free';
+
+        Widget segment(int minutes, Color color, {bool last = false}) => minutes <= 0
+            ? const SizedBox.shrink()
+            : Expanded(
+                flex: minutes,
+                child: Container(
+                  height: 14,
+                  margin: EdgeInsets.only(right: last ? 0 : 3),
+                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(4)),
+                ),
+              );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text('AVAILABLE TODAY', style: context.caption.copyWith(letterSpacing: 1.2))),
+                      TintBadge(label: freeText, color: AppColors.success),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Semantics(
+                    label: 'Today: ${usage.fixedMinutes} minutes fixed, ${usage.aiMinutes} minutes AI planned, '
+                        '${usage.breakMinutes} minutes breaks, $free minutes free',
+                    child: ExcludeSemantics(
+                      child: Row(
+                        children: [
+                          segment(usage.fixedMinutes, AppColors.primary),
+                          segment(usage.aiMinutes, AppColors.secondary),
+                          segment(usage.breakMinutes, AppColors.warning),
+                          segment(usage.otherMinutes, const Color(0xFF8B5CF6)),
+                          segment(free, AppColors.success.withValues(alpha: 0.55), last: true),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 4,
+                    children: [
+                      _Legend(AppColors.primary, 'Fixed'),
+                      _Legend(AppColors.secondary, 'AI plan'),
+                      _Legend(AppColors.warning, 'Break'),
+                      _Legend(AppColors.success.withValues(alpha: 0.55), 'Free'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            SectionHeader("Today's schedule", actionLabel: 'Calendar', onAction: widget.onViewAll),
+            const SizedBox(height: 4),
+            if (snapshot.hasError)
+              AppCard(
+                child: Text('Could not load today\'s schedule. Pull down to retry.', style: context.bodyMuted),
+              )
+            else if (snapshot.connectionState == ConnectionState.waiting && snapshot.data == null)
+              const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+            else if (items.isEmpty)
+              AppCard(
+                child: Row(
+                  children: [
+                    Icon(Icons.event_busy_outlined, color: context.cs.onSurfaceVariant),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text('Nothing scheduled today.', style: context.bodyMuted)),
+                  ],
+                ),
+              )
+            else
+              for (final item in items) ScheduleItemCard(item: item),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _Legend extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _Legend(this.color, this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text(label, style: context.label),
+      ],
+    );
+  }
+}
+
+class _PendingTasks extends StatelessWidget {
+  final List<Task> tasks;
+  final VoidCallback onViewAll;
+
+  const _PendingTasks({required this.tasks, required this.onViewAll});
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = TaskProvider.collapseSeries(tasks.where((t) => !t.isCompleted).toList())
+      ..sort((a, b) {
+        final aLate = a.status == TaskStatus.overdue;
+        final bLate = b.status == TaskStatus.overdue;
+        if (aLate != bLate) return aLate ? -1 : 1;
+        if (a.priority != b.priority) return b.priority.compareTo(a.priority);
+        return a.deadline.compareTo(b.deadline);
+      });
+    final shown = pending.take(5).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader('Pending tasks', actionLabel: pending.length > 5 ? 'View all (${pending.length})' : 'View all', onAction: onViewAll),
+        const SizedBox(height: 4),
+        if (shown.isEmpty)
+          const EmptyState(
+            compact: true,
+            title: 'All caught up',
+            subtitle: 'No pending tasks. Add one from the + button.',
+          )
+        else
+          for (final task in shown)
+            TaskCard(
+              task: task,
+              onComplete: () => toggleTaskCompletion(context, task),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(task: task))),
+              onFocus: () => startFocusOn(context, task),
+              onEdit: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AddTaskScreen(task: task))),
+              onDelete: () => confirmAndDeleteTask(context, task),
+            ),
+      ],
+    );
+  }
+}
+
+class _LoadError extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _LoadError({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 40),
+      child: EmptyState(
+        icon: Icons.cloud_off_outlined,
+        title: 'Could not load your tasks',
+        subtitle: 'Check your connection and try again.',
+        action: FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Retry')),
+      ),
     );
   }
 }

@@ -1,297 +1,277 @@
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/focus_provider.dart';
 import '../../providers/task_provider.dart';
-import '../../theme/app_colors.dart';
+import '../../theme/app_styles.dart';
+import '../../utils/feedback.dart';
+import '../../widgets/ui.dart';
 
-class FocusScreen extends StatefulWidget {
+/// Pomodoro-style countdown for one task. The session keeps running when the
+/// user leaves this screen; the Home screen shows a strip to return to it.
+class FocusScreen extends StatelessWidget {
   const FocusScreen({super.key});
 
-  @override
-  State<FocusScreen> createState() => _FocusScreenState();
-}
-
-class _FocusScreenState extends State<FocusScreen> {
-  String _formatTime(int seconds) {
-    final m = (seconds / 60).floor();
+  static String _clock(int seconds) {
+    final m = seconds ~/ 60;
     final s = seconds % 60;
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  void _confirmStop(BuildContext context, FocusProvider focusProvider, TaskProvider taskProvider) {
-    final task = focusProvider.currentTask;
-    if (task == null) return;
-    
-    // Pause before showing dialog
-    if (focusProvider.state == FocusState.running) {
-      focusProvider.pauseFocus();
-    }
+  Future<void> _finish(BuildContext context, {required bool completed}) async {
+    final focus = context.read<FocusProvider>();
+    final tasks = context.read<TaskProvider>();
+    final task = focus.currentTask;
+    final navigator = Navigator.of(context);
+    final messenger = context;
+    await guarded(messenger, () async {
+      if (completed && task != null) await tasks.completeTask(task);
+      await focus.stopFocus();
+    }, successMessage: completed ? 'Task completed. Nice work!' : 'Focus time saved');
+    if (navigator.canPop()) navigator.pop();
+  }
 
-    showDialog(
+  Future<void> _confirmStop(BuildContext context) async {
+    final focus = context.read<FocusProvider>();
+    final wasRunning = focus.state == FocusState.running;
+    if (wasRunning) await focus.pauseFocus();
+    if (!context.mounted) return;
+
+    final minutes = focus.elapsedSeconds ~/ 60;
+    final choice = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('End Focus Session'),
-        content: const Text('Did you complete this task?'),
+      builder: (ctx) => AlertDialog(
+        title: const Text('End focus session?'),
+        content: Text('You have focused for $minutes min. Did you finish "${focus.currentTask?.title ?? 'this task'}"?'),
+        actionsOverflowDirection: VerticalDirection.down,
         actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              focusProvider.stopFocus();
-              Navigator.pop(context); // Go back to previous screen
-            },
-            child: const Text('No, just stop'),
-          ),
-          FilledButton(
-            onPressed: () {
-              taskProvider.completeTask(task);
-              focusProvider.stopFocus();
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Yes, completed!'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Keep going')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'stop'), child: const Text('Not finished')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'done'), child: const Text('Finished')),
         ],
       ),
-    ).then((value) {
-      // If dialog was dismissed without choosing, and we were running, we should perhaps remain paused
-    });
+    );
+
+    if (!context.mounted) return;
+    if (choice == null) {
+      if (wasRunning) focus.resumeFocus();
+      return;
+    }
+    await _finish(context, completed: choice == 'done');
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final focusProvider = context.watch<FocusProvider>();
-    final taskProvider = context.read<TaskProvider>();
-    
-    final task = focusProvider.currentTask;
+    final focus = context.watch<FocusProvider>();
+    final task = focus.currentTask;
+
     if (task == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Focus')),
-        body: const Center(child: Text('No active focus session.')),
+        body: SafeArea(
+          child: Column(
+            children: [
+              const ScreenHeader(title: 'Focus'),
+              const Expanded(
+                child: EmptyFocus(),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
-    final isFinished = focusProvider.state == FocusState.finished;
+    final finished = focus.state == FocusState.finished;
+    final running = focus.state == FocusState.running;
+    final ringColor = context.primary;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () {
-                      // Just go back, keep running in background
-                      Navigator.pop(context);
-                    },
-                  ),
-                  Text(
-                    'Focus Mode',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(width: 48), // Balance
-                ],
-              ),
+            ScreenHeader(
+              title: 'Focus mode',
+              subtitle: 'Leaving this screen keeps the timer running',
             ),
-            
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Image.asset(
-                      'assets/images/timewise_pet.png',
-                      width: 140,
-                      height: 140,
-                    ),
-                    const SizedBox(height: 32),
-                    Text(
-                      task.title,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      task.category,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-                    
-                    // Timer display
-                    Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        SizedBox(
-                          width: 240,
-                          height: 240,
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: 0, end: focusProvider.progress),
-                            duration: const Duration(milliseconds: 500),
-                            builder: (context, value, child) {
-                              return CircularProgressIndicator(
-                                value: value,
-                                strokeWidth: 12,
-                                backgroundColor: theme.colorScheme.outline,
-                                color: AppColors.primary,
-                                strokeCap: StrokeCap.round,
-                              );
-                            },
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final ring = (constraints.maxHeight * 0.5).clamp(180.0, 260.0);
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            task.title,
+                            style: context.h1,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _formatTime(focusProvider.remainingSeconds),
-                              style: TextStyle(
-                                fontSize: 48,
-                                fontWeight: FontWeight.w900,
-                                color: theme.colorScheme.onSurface,
-                                fontFeatures: const [FontFeature.tabularFigures()],
+                          const SizedBox(height: 6),
+                          TintBadge(label: task.category, color: categoryColor(task.category)),
+                          const SizedBox(height: 28),
+                          Semantics(
+                            label: finished
+                                ? 'Time is up'
+                                : '${_clock(focus.remainingSeconds)} remaining${running ? '' : ', paused'}',
+                            child: SizedBox(
+                              width: ring,
+                              height: ring,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  SizedBox.expand(
+                                    child: TweenAnimationBuilder<double>(
+                                      tween: Tween<double>(begin: 0, end: focus.progress),
+                                      duration: const Duration(milliseconds: 500),
+                                      builder: (context, value, _) => CircularProgressIndicator(
+                                        value: value,
+                                        strokeWidth: 12,
+                                        backgroundColor: context.cs.outline,
+                                        color: ringColor,
+                                        strokeCap: StrokeCap.round,
+                                      ),
+                                    ),
+                                  ),
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _clock(focus.remainingSeconds),
+                                        style: TextStyle(
+                                          fontSize: ring > 220 ? 48 : 40,
+                                          fontWeight: FontWeight.w800,
+                                          color: context.cs.onSurface,
+                                          fontFeatures: const [FontFeature.tabularFigures()],
+                                        ),
+                                      ),
+                                      Text(
+                                        finished ? 'TIME IS UP' : (running ? 'FOCUSING' : 'PAUSED'),
+                                        style: context.caption.copyWith(
+                                          letterSpacing: 2,
+                                          color: finished ? readableOn(context.primary, context.cs.surface) : null,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
-                            if (focusProvider.state == FocusState.paused)
-                              Text(
-                                'PAUSED',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                  letterSpacing: 2,
-                                ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            '${focus.elapsedSeconds ~/ 60} of ${focus.totalSeconds ~/ 60} min focused',
+                            style: context.bodyMuted,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.page, 8, AppSpacing.page, 20),
+              child: finished
+                  ? Column(
+                      children: [
+                        GradientButton(
+                          label: 'Mark completed',
+                          icon: Icons.check,
+                          gradient: const LinearGradient(colors: [Color(0xFF15803D), Color(0xFF166534)]),
+                          onPressed: () => _finish(context, completed: true),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => focus.extendFocus(15),
+                                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                                child: const Text('Add 15 min'),
                               ),
-                            if (isFinished)
-                              Text(
-                                'TIME IS UP',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primary,
-                                  letterSpacing: 2,
-                                ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => _finish(context, completed: false),
+                                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                                child: const Text('Exit'),
                               ),
+                            ),
                           ],
                         ),
                       ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            
-            // Controls
-            Padding(
-              padding: const EdgeInsets.all(32),
-              child: isFinished 
-                ? Column(
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: () {
-                            taskProvider.completeTask(task);
-                            focusProvider.stopFocus();
-                            Navigator.pop(context);
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF22C55E),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                          child: const Text('Mark Completed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextButton(
-                        onPressed: () {
-                          focusProvider.stopFocus();
-                          Navigator.pop(context);
-                        },
-                        child: Text(
-                          'Keep uncompleted and exit',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          if (focusProvider.state == FocusState.running) {
-                            focusProvider.pauseFocus();
-                          } else {
-                            focusProvider.resumeFocus(task);
-                          }
-                        },
-                        child: Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primary.withValues(alpha: 0.3),
-                                blurRadius: 16,
-                                offset: const Offset(0, 4),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Tooltip(
+                          message: running ? 'Pause' : 'Resume',
+                          child: Material(
+                            color: context.primary,
+                            shape: const CircleBorder(),
+                            elevation: 3,
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () => running ? focus.pauseFocus() : focus.resumeFocus(),
+                              child: SizedBox(
+                                width: 72,
+                                height: 72,
+                                child: Icon(running ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 38),
                               ),
-                            ],
-                          ),
-                          child: Icon(
-                            focusProvider.state == FocusState.running ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                            color: Colors.white,
-                            size: 36,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 32),
-                      GestureDetector(
-                        onTap: () => _confirmStop(context, focusProvider, taskProvider),
-                        child: Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainer,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: theme.colorScheme.outline),
-                          ),
-                          child: const Icon(
-                            Icons.stop_rounded,
-                            color: Color(0xFFEF4444),
-                            size: 28,
+                        const SizedBox(width: 28),
+                        Tooltip(
+                          message: 'End session',
+                          child: Material(
+                            color: context.cs.surfaceContainer,
+                            shape: CircleBorder(side: BorderSide(color: context.cs.outline)),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () => _confirmStop(context),
+                              child: SizedBox(
+                                width: 56,
+                                height: 56,
+                                child: Icon(Icons.stop_rounded, color: context.cs.error, size: 28),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown if Focus is opened with no session (for example after it was ended).
+class EmptyFocus extends StatelessWidget {
+  const EmptyFocus({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.timer_off_outlined, size: 56, color: context.cs.onSurfaceVariant),
+            const SizedBox(height: 16),
+            Text('No active focus session', style: context.h3),
+            const SizedBox(height: 8),
+            Text('Start one from a task: open its menu and choose "Focus on task".',
+                style: context.bodyMuted, textAlign: TextAlign.center),
           ],
         ),
       ),

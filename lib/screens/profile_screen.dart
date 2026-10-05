@@ -1,18 +1,25 @@
 import 'dart:io';
 
-import 'package:firebase_storage/firebase_storage.dart' hide Task;
-import 'package:flutter/cupertino.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/user.dart';
-import '../models/task.dart';
 import '../providers/auth_provider.dart';
+import '../providers/preferences_provider.dart';
 import '../providers/task_provider.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_styles.dart';
+import '../utils/app_info.dart';
+import '../utils/app_logger.dart';
+import '../utils/feedback.dart';
+import '../widgets/ui.dart';
 import 'appearance_screen.dart';
+import 'auth/link_account_sheet.dart';
 
+/// Profile tab: account, productivity stats, notification and planning
+/// preferences, appearance, and sign-out.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -23,519 +30,478 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isUploadingPhoto = false;
 
-  // Mock settings state for the UI
-  bool _taskReminders = true;
-  bool _scheduleAlerts = true;
-  bool _aiSuggestions = true;
-
   Future<void> _pickAndUploadPhoto(UserModel user) async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-    if (picked == null) return;
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 1024);
+    if (picked == null || !mounted) return;
 
     setState(() => _isUploadingPhoto = true);
+    final auth = context.read<AuthProvider>();
     try {
       final ref = FirebaseStorage.instance.ref('profile_images/${user.uid}.jpg');
       await ref.putFile(File(picked.path));
       final url = await ref.getDownloadURL();
-
-      if (!mounted) return;
-      await context.read<AuthProvider>().updateProfile(
-            user.copyWith(profileImageUrl: url),
-          );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not upload photo: $e')));
-      }
+      final ok = await auth.updateProfile(user.copyWith(profileImageUrl: url));
+      if (mounted) showMessage(context, ok ? 'Profile photo updated' : (auth.errorMessage ?? 'Could not save the photo.'), error: !ok);
+    } catch (e, st) {
+      AppLogger.error('Profile', 'photo upload failed', e, st);
+      if (mounted) showMessage(context, 'Could not upload the photo. Check your connection and try again.', error: true);
     } finally {
       if (mounted) setState(() => _isUploadingPhoto = false);
     }
   }
 
-  Future<void> _editWakeSleepTimes(UserModel user) async {
-    TimeOfDay wake = _parseTime(user.wakeTime);
-    TimeOfDay sleep = _parseTime(user.sleepTime);
-
-    final result = await showDialog<Map<String, TimeOfDay>>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          title: const Text('Sleep Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('Wake time', style: TextStyle(fontWeight: FontWeight.w600)),
-                trailing: Text(wake.format(context), style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
-                onTap: () async {
-                  final picked = await showTimePicker(context: context, initialTime: wake);
-                  if (picked != null) setDialogState(() => wake = picked);
-                },
-              ),
-              ListTile(
-                title: const Text('Sleep time', style: TextStyle(fontWeight: FontWeight.w600)),
-                trailing: Text(sleep.format(context), style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
-                onTap: () async {
-                  final picked = await showTimePicker(context: context, initialTime: sleep);
-                  if (picked != null) setDialogState(() => sleep = picked);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, {'wake': wake, 'sleep': sleep}),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (result == null) return;
-    final wakeStr = _formatTime(result['wake']!);
-    final sleepStr = _formatTime(result['sleep']!);
-
-    if (!mounted) return;
-    await context.read<AuthProvider>().updateProfile(
-          user.copyWith(wakeTime: wakeStr, sleepTime: sleepStr),
-        );
+  static TimeOfDay _parse(String hhmm) {
+    final minutes = UserModel.minutesOf(hhmm, 0);
+    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
   }
 
-  Future<void> _manageCategories(UserModel user) async {
-    final categories = List<String>.from(user.categories);
-    final controller = TextEditingController();
+  static String _hhmm(TimeOfDay t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
-    final result = await showDialog<List<String>>(
+  Future<void> _editSleepSchedule(UserModel user) async {
+    var wake = _parse(user.wakeTime);
+    var sleep = _parse(user.sleepTime);
+
+    final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          title: const Text('Task Categories', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final same = wake.hour == sleep.hour && wake.minute == sleep.minute;
+          return AlertDialog(
+            title: const Text('Sleep schedule'),
+            content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Wrap(
-                  spacing: 8,
-                  children: categories
-                      .map((c) => Chip(
-                            label: Text(c, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                            backgroundColor: AppColors.primary.withValues(alpha: 0.1),
-                            side: BorderSide.none,
-                            onDeleted: categories.length > 1
-                                ? () => setDialogState(() => categories.remove(c))
-                                : null,
-                          ))
-                      .toList(),
+                Text('The AI planner never schedules anything while you sleep.', style: ctx.bodyMuted),
+                const SizedBox(height: 16),
+                PickerField(
+                  label: 'Wake up',
+                  value: wake.format(ctx),
+                  icon: Icons.wb_sunny_outlined,
+                  onTap: () async {
+                    final p = await showTimePicker(context: ctx, initialTime: wake);
+                    if (p != null) setDialogState(() => wake = p);
+                  },
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: controller,
-                        decoration: InputDecoration(
-                          hintText: 'New category',
-                          filled: true,
-                          fillColor: Theme.of(context).colorScheme.surfaceContainer,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                      child: IconButton(
-                        icon: const Icon(Icons.add, color: Colors.white),
-                        onPressed: () {
-                          final value = controller.text.trim();
-                          if (value.isNotEmpty && !categories.contains(value)) {
-                            setDialogState(() {
-                              categories.add(value);
-                              controller.clear();
-                            });
-                          }
-                        },
-                      ),
-                    ),
-                  ],
+                PickerField(
+                  label: 'Go to sleep',
+                  value: sleep.format(ctx),
+                  icon: Icons.bedtime_outlined,
+                  warn: same,
+                  helperText: same ? 'Wake and sleep times must differ.' : null,
+                  onTap: () async {
+                    final p = await showTimePicker(context: ctx, initialTime: sleep);
+                    if (p != null) setDialogState(() => sleep = p);
+                  },
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, categories),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(onPressed: same ? null : () => Navigator.pop(ctx, true), child: const Text('Save')),
+            ],
+          );
+        },
       ),
     );
-
-    if (result == null) return;
-    if (!mounted) return;
-    await context.read<AuthProvider>().updateProfile(user.copyWith(categories: result));
+    if (saved != true || !mounted) return;
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.updateProfile(user.copyWith(wakeTime: _hhmm(wake), sleepTime: _hhmm(sleep)));
+    if (mounted) showMessage(context, ok ? 'Sleep schedule saved' : (auth.errorMessage ?? 'Could not save.'), error: !ok);
   }
 
-  TimeOfDay _parseTime(String hhmm) {
-    final parts = hhmm.split(':');
-    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+  Future<void> _manageCategories(UserModel user) async {
+    final result = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _CategoriesDialog(initial: user.categories),
+    );
+    if (result == null || !mounted) return;
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.updateProfile(user.copyWith(categories: result));
+    if (mounted) showMessage(context, ok ? 'Categories saved' : (auth.errorMessage ?? 'Could not save.'), error: !ok);
   }
 
-  String _formatTime(TimeOfDay t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  Future<void> _logOut(AuthProvider auth) async {
+    final ok = await confirmAction(
+      context,
+      title: 'Log out?',
+      message: auth.isGuest
+          ? 'You are using a guest account. If you log out, its tasks and schedule cannot be recovered. '
+              'Create an account first to keep them.'
+          : 'You will need to sign in again to see your tasks.',
+      confirmLabel: 'Log out',
+      destructive: auth.isGuest,
+    );
+    if (!ok || !mounted) return;
+    await context.read<TaskProvider>().cancelAllReminders();
+    await auth.signOut();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final authProvider = context.watch<AuthProvider>();
-    final user = authProvider.currentUser;
+    final auth = context.watch<AuthProvider>();
+    final prefs = context.watch<PreferencesProvider>();
+    final tasks = context.watch<TaskProvider>().tasks;
+    final user = auth.currentUser;
 
-    if (user == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    if (user == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
+    final streak = context.read<TaskProvider>().calculateStreak(tasks);
+    final rate = TaskProvider.completionRate(tasks);
+    final focusSeconds = TaskProvider.focusSeconds(tasks);
+    final focusText = focusSeconds < 3600 ? '${focusSeconds ~/ 60}m' : '${(focusSeconds / 3600).toStringAsFixed(1)}h';
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
-      body: Stack(
-        children: [
-          // Background Gradient effect from Figma
-          Positioned(
-            top: -100,
-            left: 0,
-            right: 0,
-            height: 300,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(0, -0.5),
-                  radius: 1.0,
-                  colors: [
-                    AppColors.primary.withValues(alpha: 0.15),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          
-          SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.page, 20, AppSpacing.page, 24),
+          children: [
+            Center(
+              child: Stack(
+                clipBehavior: Clip.none,
                 children: [
-                  // Profile Header
-                  const SizedBox(height: 16),
-                  Center(
-                    child: Stack(
-                      children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: AppColors.btnGradient,
-                          ),
-                          child: user.profileImageUrl != null
-                              ? ClipOval(child: Image.network(user.profileImageUrl!, fit: BoxFit.cover))
-                              : Center(
-                                  child: Text(
-                                    user.name.isNotEmpty ? user.name[0].toUpperCase() : 'U',
-                                    style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Colors.white),
-                                  ),
-                                ),
-                        ),
-                        Positioned(
-                          bottom: -4,
-                          right: -4,
-                          child: GestureDetector(
-                            onTap: _isUploadingPhoto ? null : () => _pickAndUploadPhoto(user),
-                            child: Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surface,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: theme.colorScheme.outline, width: 2),
-                              ),
-                              child: _isUploadingPhoto
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(4),
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-                                    )
-                                  : const Icon(Icons.edit, size: 14, color: AppColors.primary),
-                            ),
+                  Container(
+                    width: 84,
+                    height: 84,
+                    decoration: BoxDecoration(shape: BoxShape.circle, gradient: context.primaryGradient),
+                    clipBehavior: Clip.antiAlias,
+                    child: user.profileImageUrl != null && user.profileImageUrl!.isNotEmpty
+                        ? Image.network(
+                            user.profileImageUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _Initial(user.name),
+                          )
+                        : _Initial(user.name),
+                  ),
+                  Positioned(
+                    right: -6,
+                    bottom: -6,
+                    child: Tooltip(
+                      message: 'Change profile photo',
+                      child: Material(
+                        color: context.cs.surface,
+                        shape: CircleBorder(side: BorderSide(color: context.cs.outline, width: 2)),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: _isUploadingPhoto ? null : () => _pickAndUploadPhoto(user),
+                          child: SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: _isUploadingPhoto
+                                ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2.5))
+                                : Icon(Icons.photo_camera_outlined, size: 20, color: context.primary),
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    user.name.isEmpty ? 'User' : user.name,
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: theme.colorScheme.onSurface),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    user.email,
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'TimeWise Member',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Productivity Stats
-                  StreamBuilder<List<Task>>(
-                    stream: context.read<TaskProvider>().getUserTasksStream(user.uid),
-                    builder: (context, snapshot) {
-                      final tasks = snapshot.data ?? [];
-                      final streak = context.read<TaskProvider>().calculateStreak(tasks);
-                      final completedCount = tasks.where((t) => t.isCompleted).length;
-                      final totalCount = tasks.length;
-                      final completionRate = totalCount == 0 ? 0 : ((completedCount / totalCount) * 100).round();
-                      
-                      // Calculate focus time (estimate based on completed tasks)
-                      final focusMinutes = tasks.where((t) => t.isCompleted).fold(0, (sum, t) => sum + t.estimatedMinutes);
-                      final focusHours = (focusMinutes / 60).toStringAsFixed(1);
-                      
-                      return Row(
-                        children: [
-                          Expanded(child: _buildStatCard('🔥', '$completionRate%', 'Completion')),
-                          const SizedBox(width: 8),
-                          Expanded(child: _buildStatCard('🎯', '$streak', 'Day Streak')),
-                          const SizedBox(width: 8),
-                          Expanded(child: _buildStatCard('⏱️', '${focusHours}h', 'Focus Time')),
-                        ],
-                      );
-                    }
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Notifications
-                  _buildSectionLabel('NOTIFICATIONS'),
-                  const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: theme.colorScheme.outline),
-                    ),
-                    child: Column(
-                      children: [
-                        _buildToggleRow('⏰', 'Task Reminders', _taskReminders, (v) => setState(() => _taskReminders = v)),
-                        _buildDivider(),
-                        _buildToggleRow('📅', 'Schedule Alerts', _scheduleAlerts, (v) => setState(() => _scheduleAlerts = v)),
-                        _buildDivider(),
-                        _buildToggleRow('✨', 'AI Suggestions', _aiSuggestions, (v) => setState(() => _aiSuggestions = v), isLast: true),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // AI & Schedule Preferences
-                  _buildSectionLabel('PREFERENCES'),
-                  const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: theme.colorScheme.outline),
-                    ),
-                    child: Column(
-                      children: [
-                        _buildNavRow('Sleep Schedule', '${user.wakeTime} - ${user.sleepTime}', onTap: () => _editWakeSleepTimes(user)),
-                        _buildDivider(),
-                        _buildNavRow('Task Categories', '${user.categories.length} custom', onTap: () => _manageCategories(user), isLast: true),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // App Settings
-                  _buildSectionLabel('APP SETTINGS'),
-                  const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: theme.colorScheme.outline),
-                    ),
-                    child: Column(
-                      children: [
-                        _buildNavRow('Appearance', '', icon: '🎨', onTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const AppearanceScreen()));
-                        }),
-                        _buildDivider(),
-                        _buildNavRow('About TimeWise', 'v2.0', icon: 'ℹ️', isLast: true),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Account
-                  _buildSectionLabel('ACCOUNT'),
-                  const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: theme.colorScheme.outline),
-                    ),
-                    child: Column(
-                      children: [
-                        _buildNavRow('Google Account', 'Connected', icon: '👤'),
-                        _buildDivider(),
-                        _buildNavRow('Log Out', '', icon: '🚪', isDanger: true, onTap: () async {
-                          await context.read<AuthProvider>().signOut();
-                          if (context.mounted) {
-                            Navigator.of(context).popUntil((route) => route.isFirst);
-                          }
-                        }, isLast: true),
-                      ],
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 24),
-                  Text(
-                    'TimeWise v2.0 · Smart Time Management',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String emoji, String value, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 16)),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionLabel(String label) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 4),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.5,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+            const SizedBox(height: 16),
+            Center(child: Text(user.name.isEmpty ? 'User' : user.name, style: context.h1)),
+            const SizedBox(height: 2),
+            Center(
+              child: Text(auth.isGuest ? 'Guest account' : user.email, style: context.bodyMuted),
+            ),
+            const SizedBox(height: 8),
+            Center(child: TintBadge(label: 'Signed in with ${auth.signInMethod}', color: context.primary, icon: Icons.verified_user_outlined)),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(child: _Stat(icon: Icons.task_alt, value: '$rate%', label: 'Completion')),
+                const SizedBox(width: 8),
+                Expanded(child: _Stat(icon: Icons.local_fire_department, value: '$streak', label: 'Day streak')),
+                const SizedBox(width: 8),
+                Expanded(child: _Stat(icon: Icons.timer_outlined, value: focusText, label: 'Focus time')),
+              ],
+            ),
+            if (auth.isGuest) ...[
+              const SizedBox(height: 16),
+              AppCard(
+                color: context.primary.withValues(alpha: 0.08),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.cloud_off_outlined, color: context.primary),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text('Your data is tied to this device', style: context.h3)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Create an account to keep your tasks and schedule if you log out or change phone.',
+                      style: context.bodyMuted,
+                    ),
+                    const SizedBox(height: 12),
+                    GradientButton(label: 'Create account', onPressed: () => showLinkAccountSheet(context)),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 24),
+            const SectionLabel('Notifications'),
+            _Group(children: [
+              SwitchRow(
+                icon: Icons.notifications_active_outlined,
+                title: 'Task reminders',
+                subtitle: 'Alert before a task is due (set per task)',
+                value: prefs.taskReminders,
+                onChanged: prefs.setTaskReminders,
+              ),
+              SwitchRow(
+                icon: Icons.auto_awesome,
+                title: 'AI planner',
+                subtitle: 'Show the AI Schedule card and button',
+                value: prefs.aiSuggestions,
+                onChanged: prefs.setAiSuggestions,
+              ),
+            ]),
+            const SizedBox(height: 24),
+            const SectionLabel('Planning'),
+            _Group(children: [
+              _NavRow(
+                icon: Icons.bedtime_outlined,
+                label: 'Sleep schedule',
+                value: '${_parse(user.wakeTime).format(context)} – ${_parse(user.sleepTime).format(context)}',
+                onTap: () => _editSleepSchedule(user),
+              ),
+              _NavRow(
+                icon: Icons.label_outline,
+                label: 'Task categories',
+                value: '${user.categories.length}',
+                onTap: () => _manageCategories(user),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            const SectionLabel('App'),
+            _Group(children: [
+              _NavRow(
+                icon: Icons.palette_outlined,
+                label: 'Appearance',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AppearanceScreen())),
+              ),
+              _NavRow(
+                icon: Icons.info_outline,
+                label: 'About $kAppName',
+                value: 'v$kAppVersion',
+                onTap: () => showAboutDialog(
+                  context: context,
+                  applicationName: kAppName,
+                  applicationVersion: 'Version $kAppVersion (build $kAppBuild)',
+                  applicationIcon: Image.asset('assets/images/timewise_pet.png', width: 48, height: 48),
+                  children: const [
+                    SizedBox(height: 12),
+                    Text('A smart time-management app for students: tasks, a calendar, focus sessions and an AI schedule planner.'),
+                  ],
+                ),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            const SectionLabel('Account'),
+            _Group(children: [
+              _NavRow(
+                icon: Icons.logout,
+                label: 'Log out',
+                danger: true,
+                onTap: () => _logOut(auth),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            Center(child: Text('$kAppName v$kAppVersion', style: context.label)),
+          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildDivider() {
-    return Divider(height: 1, color: Theme.of(context).colorScheme.outline);
-  }
+class _Initial extends StatelessWidget {
+  final String name;
+  const _Initial(this.name);
 
-  Widget _buildToggleRow(String emoji, String label, bool value, ValueChanged<bool> onChanged, {bool isLast = false}) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 16)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
-            ),
-          ),
-          CupertinoSwitch(
-            value: value,
-            onChanged: onChanged,
-            activeTrackColor: AppColors.primary,
-          ),
-        ],
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : 'U',
+        style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: Colors.white),
       ),
     );
   }
+}
 
-  Widget _buildNavRow(String label, String value, {String? icon, bool isDanger = false, bool isLast = false, VoidCallback? onTap}) {
-    final theme = Theme.of(context);
-    final color = isDanger ? const Color(0xFFEF4444) : theme.colorScheme.onSurface;
-    
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.only(
-        bottomLeft: Radius.circular(isLast ? 20 : 0),
-        bottomRight: Radius.circular(isLast ? 20 : 0),
+class _Stat extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+
+  const _Stat({required this.icon, required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '$label: $value',
+      child: AppCard(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        radius: AppRadius.md,
+        child: Column(
+          children: [
+            Icon(icon, size: 20, color: label == 'Day streak' ? readableOn(AppColors.warning, context.cs.surfaceContainer) : context.primary),
+            const SizedBox(height: 4),
+            FittedBox(fit: BoxFit.scaleDown, child: Text(value, style: context.h2)),
+            const SizedBox(height: 2),
+            Text(label, style: context.label, textAlign: TextAlign.center),
+          ],
+        ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+}
+
+class _Group extends StatelessWidget {
+  final List<Widget> children;
+  const _Group({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          children[i],
+          if (i != children.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _NavRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? value;
+  final bool danger;
+  final VoidCallback onTap;
+
+  const _NavRow({required this.icon, required this.label, this.value, this.danger = false, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? context.cs.error : context.primary;
+    return Semantics(
+      button: true,
+      label: value == null ? label : '$label, $value',
+      child: AppCard(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        radius: AppRadius.md,
+        onTap: onTap,
         child: Row(
           children: [
-            if (icon != null) ...[
-              Text(icon, style: const TextStyle(fontSize: 16)),
-              const SizedBox(width: 12),
-            ],
+            IconTile(icon: icon, color: color, size: 40),
+            const SizedBox(width: 14),
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
+                style: context.body.copyWith(fontWeight: FontWeight.w700, color: danger ? readableOn(context.cs.error, context.cs.surfaceContainer) : null),
               ),
             ),
-            if (value.isNotEmpty)
-              Text(
-                value,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+            if (value != null)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 190),
+                child: Text(value!, style: context.label, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end),
               ),
-            if (onTap != null) ...[
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right, size: 16, color: theme.colorScheme.onSurfaceVariant),
+            if (!danger) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right, size: 20, color: context.cs.onSurfaceVariant),
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Add and remove task categories. Pops the new list, or null on Cancel.
+class _CategoriesDialog extends StatefulWidget {
+  final List<String> initial;
+  const _CategoriesDialog({required this.initial});
+
+  @override
+  State<_CategoriesDialog> createState() => _CategoriesDialogState();
+}
+
+class _CategoriesDialogState extends State<_CategoriesDialog> {
+  late final List<String> _categories = List<String>.from(widget.initial);
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _duplicate {
+    final value = _controller.text.trim().toLowerCase();
+    return value.isNotEmpty && _categories.any((c) => c.toLowerCase() == value);
+  }
+
+  void _add() {
+    final value = _controller.text.trim();
+    if (value.isEmpty || _duplicate) return;
+    setState(() {
+      _categories.add(value);
+      _controller.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Task categories'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final c in _categories)
+                    InputChip(
+                      label: Text(c),
+                      onDeleted: _categories.length > 1 ? () => setState(() => _categories.remove(c)) : null,
+                      deleteButtonTooltipMessage: 'Remove $c',
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _controller,
+                maxLength: 20,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _add(),
+                decoration: InputDecoration(
+                  labelText: 'New category',
+                  errorText: _duplicate ? 'That category already exists.' : null,
+                  counterText: '',
+                  suffixIcon: IconButton(tooltip: 'Add category', icon: const Icon(Icons.add_circle), onPressed: _add),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(context, _categories), child: const Text('Save')),
+      ],
     );
   }
 }

@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 
-import '../../providers/auth_provider.dart';
-import '../../providers/task_provider.dart';
-import '../../providers/schedule_provider.dart';
 import '../../models/schedule.dart';
 import '../../models/task.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/preferences_provider.dart';
+import '../../providers/schedule_provider.dart';
+import '../../providers/task_provider.dart';
 import '../../theme/app_colors.dart';
-import '../../widgets/schedule_item_card.dart';
+import '../../theme/app_styles.dart';
+import '../../utils/feedback.dart';
 import '../../widgets/empty_state.dart';
-import 'ai_schedule_preview_screen.dart';
+import '../../widgets/schedule_item_card.dart';
+import '../../widgets/ui.dart';
+import '../tasks/task_detail_screen.dart';
 import 'add_fixed_event_screen.dart';
-import '../../services/ai_service.dart';
+import 'ai_schedule_flow.dart';
 
+/// Calendar tab: week/month view with day markers, the selected day's events
+/// and due tasks, and the entry point of the AI planner for that day.
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
 
@@ -23,464 +29,401 @@ class ScheduleScreen extends StatefulWidget {
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  late DateTime _selectedDate;
-  late DateTime _focusedDate;
-  CalendarFormat _calendarFormat = CalendarFormat.week;
+  DateTime _selectedDate = DateTime.now();
+  DateTime _focusedDate = DateTime.now();
+  CalendarFormat _format = CalendarFormat.week;
+
+  String? _uid;
+  Stream<List<ScheduleItem>>? _dayStream;
+  Stream<List<ScheduleItem>>? _rangeStream;
+  DateTime? _rangeAnchor;
 
   @override
-  void initState() {
-    super.initState();
-    _selectedDate = DateTime.now();
-    _focusedDate = DateTime.now();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final uid = context.read<AuthProvider>().currentUser?.uid;
+    if (uid != _uid) {
+      _uid = uid;
+      _dayStream = null;
+      _rangeStream = null;
+      _rangeAnchor = null;
+    }
+    _ensureStreams();
   }
 
-  Future<List<ScheduleItem>> _generatePreview() async {
-    final authProvider = context.read<AuthProvider>();
-    final taskProvider = context.read<TaskProvider>();
-    final scheduleProvider = context.read<ScheduleProvider>();
-    final user = authProvider.currentUser;
-    if (user == null) return [];
-
-    final tasks = await taskProvider.getActiveTasksStream(user.uid).first;
-
-    return scheduleProvider.generateAISchedulePreview(
-      userId: user.uid,
-      tasks: tasks,
-      scheduleDate: _selectedDate,
-      user: user,
-    );
-  }
-
-  Future<void> _generateAISchedule() async {
-    final scheduleProvider = context.read<ScheduleProvider>();
-    final authProvider = context.read<AuthProvider>();
-    final userId = authProvider.currentUser?.uid ?? '';
-
-    if (!scheduleProvider.isAIConfigured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'AI Schedule Assistant is not configured. Launch the app with '
-            '--dart-define=GEMINI_API_KEY=your_key to enable it.',
-          ),
-        ),
+  /// Streams are created once per selected day / visible month, never inside
+  /// build, so rebuilding the screen does not restart the Firestore queries.
+  void _ensureStreams() {
+    final uid = _uid;
+    if (uid == null) return;
+    final provider = context.read<ScheduleProvider>();
+    _dayStream ??= provider.watchDay(uid, _selectedDate);
+    final anchor = DateTime(_focusedDate.year, _focusedDate.month);
+    if (_rangeStream == null || _rangeAnchor != anchor) {
+      _rangeAnchor = anchor;
+      _rangeStream = provider.watchRange(
+        uid,
+        DateTime(anchor.year, anchor.month, 1 - 7),
+        DateTime(anchor.year, anchor.month + 1, 8),
       );
+    }
+  }
+
+  void _select(DateTime day, DateTime focused) {
+    setState(() {
+      final dayChanged = !isSameDay(day, _selectedDate);
+      _selectedDate = day;
+      _focusedDate = focused;
+      if (dayChanged) _dayStream = null;
+      _ensureStreams();
+    });
+  }
+
+  void _goToToday() {
+    final now = DateTime.now();
+    _select(now, now);
+  }
+
+  void _addEvent() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => AddFixedEventScreen(date: _selectedDate)));
+  }
+
+  void _openItem(ScheduleItem item) {
+    if (item.isTaskRow) {
+      final task = context.read<TaskProvider>().byId(item.taskId ?? '');
+      if (task != null) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailScreen(task: task)));
+      }
       return;
     }
-
-    try {
-      final preview = await _generatePreview();
-      if (!mounted) return;
-
-      if (preview.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No pending tasks to schedule for this day')),
-        );
-        return;
-      }
-
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => AIedSchedulePreviewScreen(
-            userId: userId,
-            scheduleDate: _selectedDate,
-            initialItems: preview,
-            onRegenerate: _generatePreview,
+    showAppSheet<void>(
+      context,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SheetHeader(item.title),
+          SheetAction(
+            icon: Icons.edit_outlined,
+            title: 'Edit event',
+            description: item.isRecurring ? 'Changes only this occurrence' : null,
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => AddFixedEventScreen(date: item.startTime, item: item)));
+            },
           ),
-        ),
-      );
-    } on AIConfigException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
-      }
-    }
-  }
-
-  void _addFixedEvent() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => AddFixedEventScreen(date: _selectedDate)),
+          SheetAction(
+            icon: Icons.delete_outline,
+            title: 'Delete',
+            color: ctx.cs.error,
+            onTap: () {
+              Navigator.pop(ctx);
+              _confirmDelete(item);
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 
-  Future<void> _confirmDeleteScheduleItem(ScheduleItem item) async {
-    final scheduleProvider = context.read<ScheduleProvider>();
+  Future<void> _confirmDelete(ScheduleItem item) async {
+    final provider = context.read<ScheduleProvider>();
 
     if (!item.isRecurring) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Delete event?'),
-          content: const Text('This cannot be undone.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
-              onPressed: () => Navigator.pop(context, true), 
-              child: const Text('Delete'),
-            ),
-          ],
-        ),
+      final ok = await confirmAction(
+        context,
+        title: 'Delete event?',
+        message: '"${item.title}" will be removed from your calendar.',
       );
-      if (confirmed == true) {
-        if (mounted) {
-          await scheduleProvider.deleteScheduleItem(item.id);
-        }
-      }
+      if (!ok || !mounted) return;
+      await guarded(context, () => provider.deleteScheduleItem(item.id), successMessage: 'Event deleted');
       return;
     }
-
-    if (!mounted) return;
 
     final scope = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         title: const Text('Delete repeating event'),
-        content: const Text(
-          'This event repeats. Delete just this occurrence, or every occurrence in the series?',
-        ),
+        content: Text('"${item.title}" repeats. Delete just this occurrence, or every occurrence in the series?'),
+        actionsOverflowDirection: VerticalDirection.down,
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'this'),
-            child: const Text('This occurrence'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'this'), child: const Text('This occurrence')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
-            onPressed: () => Navigator.pop(context, 'series'),
+            style: FilledButton.styleFrom(backgroundColor: ctx.cs.error, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, 'series'),
             child: const Text('Entire series'),
           ),
         ],
       ),
     );
+    if (scope == null || !mounted) return;
     if (scope == 'this') {
-      await scheduleProvider.deleteScheduleItem(item.id);
-    } else if (scope == 'series') {
-      await scheduleProvider.deleteScheduleSeries(item.recurrenceId!);
+      await guarded(context, () => provider.deleteScheduleItem(item.id), successMessage: 'Event deleted');
+    } else {
+      await guarded(
+        context,
+        () => provider.deleteScheduleSeries(item.userId, item.recurrenceId!),
+        successMessage: 'Series deleted',
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final userId = context.watch<AuthProvider>().currentUser?.uid ?? '';
-    final monthFormat = DateFormat('MMMM yyyy');
-    final dayFormat = DateFormat('EEEE, MMMM d');
+    final aiEnabled = context.watch<PreferencesProvider>().aiSuggestions;
+    final tasks = context.watch<TaskProvider>().tasks;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addEvent,
+        icon: const Icon(Icons.add),
+        label: const Text('Event', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
       body: SafeArea(
         child: Column(
           children: [
-            // Custom Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Calendar',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        monthFormat.format(_focusedDate),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          final now = DateTime.now();
-                          setState(() {
-                            _selectedDate = now;
-                            _focusedDate = now;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
-                          ),
-                          child: const Text(
-                            'Today',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            
-            // Format Toggle
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.page, 20, AppSpacing.page, 12),
               child: Row(
                 children: [
-                  _buildFormatBtn(CalendarFormat.month, 'Month'),
-                  const SizedBox(width: 8),
-                  _buildFormatBtn(CalendarFormat.week, 'Week'),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 16),
-
-            // Calendar
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: theme.colorScheme.outline),
-              ),
-              child: TableCalendar(
-                firstDay: DateTime.now().subtract(const Duration(days: 365)),
-                lastDay: DateTime.now().add(const Duration(days: 365)),
-                focusedDay: _focusedDate,
-                selectedDayPredicate: (day) => isSameDay(day, _selectedDate),
-                onDaySelected: (selectedDay, focusedDay) {
-                  setState(() {
-                    _selectedDate = selectedDay;
-                    _focusedDate = focusedDay;
-                  });
-                },
-                onPageChanged: (focusedDay) {
-                  setState(() {
-                    _focusedDate = focusedDay;
-                  });
-                },
-                calendarFormat: _calendarFormat,
-                availableCalendarFormats: const {
-                  CalendarFormat.month: 'Month',
-                  CalendarFormat.week: 'Week',
-                },
-                headerVisible: false,
-                calendarStyle: CalendarStyle(
-                  selectedDecoration: const BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  todayDecoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  todayTextStyle: const TextStyle(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  selectedTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                daysOfWeekStyle: DaysOfWeekStyle(
-                  weekdayStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurfaceVariant),
-                  weekendStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Schedule Items Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    dayFormat.format(_selectedDate),
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                      color: theme.colorScheme.onSurface,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Calendar', style: context.h1),
+                        const SizedBox(height: 2),
+                        Text(DateFormat('MMMM yyyy').format(_focusedDate), style: context.label),
+                      ],
                     ),
                   ),
-                  Row(
-                    children: [
-                      GestureDetector(
-                        onTap: _generateAISchedule,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.secondary.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.auto_awesome, size: 14, color: AppColors.secondary),
-                              SizedBox(width: 4),
-                              Text(
-                                'AI Schedule',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.secondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                  OutlinedButton(
+                    onPressed: _goToToday,
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(72, 44)),
+                    child: const Text('Today'),
                   ),
                 ],
               ),
             ),
-            
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+              child: Row(
+                children: [
+                  PillChip(
+                    label: 'Week',
+                    selected: _format == CalendarFormat.week,
+                    onTap: () => setState(() => _format = CalendarFormat.week),
+                  ),
+                  const SizedBox(width: 8),
+                  PillChip(
+                    label: 'Month',
+                    selected: _format == CalendarFormat.month,
+                    onTap: () => setState(() => _format = CalendarFormat.month),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 12),
-
-            // Schedule List
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+              child: _CalendarCard(
+                rangeStream: _rangeStream,
+                tasks: tasks,
+                selected: _selectedDate,
+                focused: _focusedDate,
+                format: _format,
+                onSelected: _select,
+                onPageChanged: (focused) => setState(() {
+                  _focusedDate = focused;
+                  _ensureStreams();
+                }),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.page, 12, AppSpacing.page, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      DateFormat('EEEE, MMMM d').format(_selectedDate),
+                      style: context.h3,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (aiEnabled)
+                    FilledButton.icon(
+                      onPressed: () => startAiScheduleFlow(context, _selectedDate),
+                      icon: const Icon(Icons.auto_awesome, size: 18),
+                      label: const Text('AI Schedule'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 44),
+                        backgroundColor: context.primary.withValues(alpha: 0.12),
+                        foregroundColor: readableOn(context.primary, context.cs.surface),
+                        elevation: 0,
+                      ),
+                    ),
+                ],
+              ),
+            ),
             Expanded(
-              child: StreamBuilder<List<ScheduleItem>>(
-                stream: context.read<ScheduleProvider>().getUserScheduleStream(userId, _selectedDate),
-                builder: (context, scheduleSnapshot) {
-                  return StreamBuilder<List<Task>>(
-                    stream: context.read<TaskProvider>().getUserTasksStream(userId),
-                    builder: (context, taskSnapshot) {
-                      if (scheduleSnapshot.connectionState == ConnectionState.waiting && taskSnapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-
-                      if (scheduleSnapshot.hasError || taskSnapshot.hasError) {
-                        return EmptyState(
-                          icon: Icons.error_outline,
-                          title: 'Could not load calendar data',
-                          subtitle: scheduleSnapshot.error?.toString() ?? taskSnapshot.error?.toString(),
-                        );
-                      }
-
-                      final schedules = [...?scheduleSnapshot.data];
-                      final scheduledTaskIds = schedules.where((s) => s.taskId != null).map((s) => s.taskId!).toSet();
-                      
-                      final tasks = (taskSnapshot.data ?? []).where((t) {
-                        return t.deadline.year == _selectedDate.year &&
-                               t.deadline.month == _selectedDate.month &&
-                               t.deadline.day == _selectedDate.day &&
-                               !scheduledTaskIds.contains(t.id);
-                      });
-
-                      final combinedItems = [
-                        ...schedules,
-                        ...tasks.map((t) => ScheduleItem(
-                          id: t.id, // We prefix with task_ to avoid ID collisions if any, though UUIDs shouldn't collide
-                          userId: t.userId,
-                          title: t.title,
-                          startTime: t.deadline,
-                          endTime: t.deadline.add(Duration(minutes: t.estimatedMinutes)),
-                          type: 'task',
-                          isFixed: false,
-                          taskId: t.id,
-                        ))
-                      ];
-
-                      combinedItems.sort((a, b) => a.startTime.compareTo(b.startTime));
-
-                      if (combinedItems.isEmpty) {
-                        return EmptyState(
-                          icon: Icons.calendar_today,
-                          title: 'No schedule for this day',
-                          subtitle: 'Add fixed events or use AI Schedule to plan your day.',
-                          action: ElevatedButton(
-                            onPressed: _addFixedEvent,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text('Add Event'),
-                          ),
-                        );
-                      }
-
-                      return ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                        itemCount: combinedItems.length,
-                        itemBuilder: (context, index) {
-                          final item = combinedItems[index];
-                          return ScheduleItemCard(
-                            item: item,
-                            onDelete: () {
-                              if (item.type == 'task') {
-                                context.read<TaskProvider>().deleteTask(item.taskId!);
-                              } else {
-                                _confirmDeleteScheduleItem(item);
-                              }
-                            },
-                          );
-                        },
-                      );
-                    },
-                  );
-                },
+              child: _DayList(
+                stream: _dayStream,
+                day: _selectedDate,
+                tasks: tasks,
+                onTapItem: _openItem,
+                aiEnabled: aiEnabled,
               ),
             ),
           ],
         ),
       ),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 72), // Avoid bottom nav
-        child: FloatingActionButton.extended(
-          onPressed: _addFixedEvent,
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          icon: const Icon(Icons.add),
-          label: const Text('Event', style: TextStyle(fontWeight: FontWeight.bold)),
-        ),
-      ),
     );
   }
+}
 
-  Widget _buildFormatBtn(CalendarFormat format, String label) {
-    final theme = Theme.of(context);
-    final isSelected = _calendarFormat == format;
-    
-    return GestureDetector(
-      onTap: () => setState(() => _calendarFormat = format),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : theme.colorScheme.surfaceContainer,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : theme.colorScheme.outline,
+class _CalendarCard extends StatelessWidget {
+  final Stream<List<ScheduleItem>>? rangeStream;
+  final List<Task> tasks;
+  final DateTime selected;
+  final DateTime focused;
+  final CalendarFormat format;
+  final void Function(DateTime selected, DateTime focused) onSelected;
+  final ValueChanged<DateTime> onPageChanged;
+
+  const _CalendarCard({
+    required this.rangeStream,
+    required this.tasks,
+    required this.selected,
+    required this.focused,
+    required this.format,
+    required this.onSelected,
+    required this.onPageChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ScheduleItem>>(
+      stream: rangeStream,
+      builder: (context, snapshot) {
+        // Days that have an event or a task due get a dot.
+        final marked = <DateTime>{
+          for (final item in snapshot.data ?? const <ScheduleItem>[])
+            DateTime(item.startTime.year, item.startTime.month, item.startTime.day),
+          for (final task in tasks)
+            if (!task.isCompleted) DateTime(task.deadline.year, task.deadline.month, task.deadline.day),
+        };
+        final today = DateTime.now();
+        return AppCard(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+          child: TableCalendar<int>(
+            firstDay: DateTime(today.year - 1, today.month, today.day),
+            lastDay: DateTime(today.year + 2, today.month, today.day),
+            focusedDay: focused,
+            selectedDayPredicate: (day) => isSameDay(day, selected),
+            onDaySelected: onSelected,
+            onPageChanged: onPageChanged,
+            calendarFormat: format,
+            availableCalendarFormats: const {CalendarFormat.month: 'Month', CalendarFormat.week: 'Week'},
+            headerVisible: false,
+            startingDayOfWeek: StartingDayOfWeek.monday,
+            rowHeight: 46,
+            eventLoader: (day) => marked.contains(DateTime(day.year, day.month, day.day)) ? const [1] : const [],
+            calendarStyle: CalendarStyle(
+              defaultTextStyle: context.body,
+              weekendTextStyle: context.body,
+              outsideTextStyle: context.bodyMuted.copyWith(color: context.cs.onSurfaceVariant.withValues(alpha: 0.6)),
+              selectedDecoration: BoxDecoration(color: context.primary, shape: BoxShape.circle),
+              selectedTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+              todayDecoration: BoxDecoration(color: context.primary.withValues(alpha: 0.16), shape: BoxShape.circle),
+              todayTextStyle: TextStyle(fontWeight: FontWeight.w800, color: readableOn(context.primary, context.cs.surfaceContainer)),
+              markersMaxCount: 1,
+              markerSize: 5,
+              markerMargin: const EdgeInsets.only(top: 2),
+              markerDecoration: BoxDecoration(color: readableOn(AppColors.secondary, context.cs.surfaceContainer, minRatio: 3), shape: BoxShape.circle),
+            ),
+            daysOfWeekStyle: DaysOfWeekStyle(
+              weekdayStyle: context.caption,
+              weekendStyle: context.caption,
+            ),
           ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-            color: isSelected ? Colors.white : theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
+        );
+      },
+    );
+  }
+}
+
+/// Events and due tasks of one day. Owns no stream: the parent creates it once
+/// per selected day.
+class _DayList extends StatelessWidget {
+  final Stream<List<ScheduleItem>>? stream;
+  final DateTime day;
+  final List<Task> tasks;
+  final ValueChanged<ScheduleItem> onTapItem;
+  final bool aiEnabled;
+
+  const _DayList({
+    required this.stream,
+    required this.day,
+    required this.tasks,
+    required this.onTapItem,
+    required this.aiEnabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ScheduleItem>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const EmptyState(
+            icon: Icons.cloud_off_outlined,
+            title: 'Could not load this day',
+            subtitle: 'Check your connection. Your calendar will refresh when you are back online.',
+          );
+        }
+        if (snapshot.data == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final schedule = [...snapshot.data!];
+        final plannedTaskIds = schedule.where((s) => s.taskId != null).map((s) => s.taskId!).toSet();
+
+        // A task due on this day appears as a "Due" row unless the AI already planned it.
+        final dueRows = tasks
+            .where((t) =>
+                t.deadline.year == day.year &&
+                t.deadline.month == day.month &&
+                t.deadline.day == day.day &&
+                !plannedTaskIds.contains(t.id))
+            .map((t) => ScheduleItem(
+                  id: '$kTaskRowPrefix${t.id}',
+                  userId: t.userId,
+                  title: t.isCompleted ? '${t.title} (done)' : t.title,
+                  startTime: t.deadline,
+                  endTime: t.deadline.add(Duration(minutes: t.estimatedMinutes)),
+                  type: ScheduleTypes.task,
+                  taskId: t.id,
+                ));
+
+        final items = [...schedule, ...dueRows]..sort((a, b) => a.startTime.compareTo(b.startTime));
+
+        if (items.isEmpty) {
+          return EmptyState(
+            icon: Icons.event_available_outlined,
+            title: 'Nothing planned',
+            subtitle: aiEnabled
+                ? 'Add an event, or let AI Schedule plan your tasks for this day.'
+                : 'Add an event to start planning this day.',
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.page, 8, AppSpacing.page, 88),
+          itemCount: items.length,
+          itemBuilder: (context, index) => ScheduleItemCard(item: items[index], onTap: () => onTapItem(items[index])),
+        );
+      },
     );
   }
 }

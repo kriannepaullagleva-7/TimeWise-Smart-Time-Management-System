@@ -2,10 +2,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'recurrence.dart';
 
+/// Prefix of the synthetic id given to a task shown on the Calendar. Such a
+/// row is the task itself (not a schedule document) and must be deleted as a
+/// task, never as a schedule item.
+const String kTaskRowPrefix = 'task:';
+
 /// Fixed activity types: created by the user and never overwritten by the
-/// AI scheduler (class, work, appointment, travel, personal).
+/// AI scheduler (class, work, appointment, travel).
 /// Flexible types: placed by the AI or the user into free time
-/// (task, break, meal, exercise, personal_time).
+/// (task, break, meal, exercise, personal).
 class ScheduleTypes {
   static const class_ = 'class';
   static const work = 'work';
@@ -19,6 +24,20 @@ class ScheduleTypes {
   static const personal = 'personal';
 
   static const fixedTypes = [class_, work, appointment, travel, sleep];
+
+  /// Types the user can pick when creating an event.
+  static const selectable = [class_, work, appointment, travel, exercise, personal];
+
+  static String label(String type) {
+    switch (type) {
+      case class_:
+        return 'Class';
+      case breakTime:
+        return 'Break';
+      default:
+        return type.isEmpty ? '' : type[0].toUpperCase() + type.substring(1);
+    }
+  }
 }
 
 class ScheduleItem {
@@ -55,6 +74,9 @@ class ScheduleItem {
 
   bool get isRecurring => recurrenceId != null;
 
+  /// True for a Calendar row that stands for a task due on that day.
+  bool get isTaskRow => id.startsWith(kTaskRowPrefix);
+
   Duration get duration => endTime.difference(startTime);
 
   bool overlapsWith(ScheduleItem other) {
@@ -67,6 +89,8 @@ class ScheduleItem {
     DateTime? endTime,
     String? type,
     String? note,
+    bool? isFixed,
+    bool clearNote = false,
   }) {
     return ScheduleItem(
       id: id,
@@ -77,8 +101,8 @@ class ScheduleItem {
       type: type ?? this.type,
       taskId: taskId,
       isAISuggested: isAISuggested,
-      isFixed: isFixed,
-      note: note ?? this.note,
+      isFixed: isFixed ?? this.isFixed,
+      note: clearNote ? null : (note ?? this.note),
       recurrenceId: recurrenceId,
       recurrence: recurrence,
     );

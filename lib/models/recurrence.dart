@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 enum RecurrenceFrequency { none, daily, weekly, monthly }
 
 /// Describes how a task/fixed-event repeats. Instances are materialized as
-/// individual Firestore docs (see FirestoreService.addTasksBatch /
-/// addScheduleItemsBatch) rather than expanded on the fly, so completion
+/// individual Firestore docs (see the task repository /
+/// the schedule repository) rather than expanded on the fly, so completion
 /// state, edits and reminders can be tracked per-occurrence like any other
 /// task/event. All docs in a series share [RecurrenceRule] and a
 /// `recurrenceId` (the first occurrence's own id).

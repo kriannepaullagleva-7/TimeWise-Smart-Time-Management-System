@@ -44,3 +44,6 @@ app.*.map.json
 /android/app/profile
 # Environment variables
 .env
+
+# Local run-time secrets (copy dart_defines.example.json)
+dart_defines.json

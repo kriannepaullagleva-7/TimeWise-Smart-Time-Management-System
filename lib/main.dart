@@ -1,40 +1,48 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuth;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
-import 'services/notification_service.dart';
 import 'providers/auth_provider.dart';
-import 'providers/task_provider.dart';
-import 'providers/schedule_provider.dart';
-import 'providers/theme_provider.dart';
 import 'providers/focus_provider.dart';
-import 'screens/splash/loading_screen.dart';
-import 'screens/onboarding/welcome_screen.dart';
+import 'providers/preferences_provider.dart';
+import 'providers/schedule_provider.dart';
+import 'providers/task_provider.dart';
+import 'providers/theme_provider.dart';
 import 'screens/home_screen.dart';
+import 'screens/onboarding/welcome_screen.dart';
+import 'screens/splash/loading_screen.dart';
+import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_logger.dart';
+
+/// Developer switch: `--dart-define=USE_FIREBASE_EMULATOR=true` points the app
+/// at the Firebase Local Emulator Suite (a throw-away local backend) instead
+/// of the real project. Off by default.
+const bool _useEmulator = bool.fromEnvironment('USE_FIREBASE_EMULATOR');
+const String _emulatorHost = String.fromEnvironment('FIREBASE_EMULATOR_HOST', defaultValue: '10.0.2.2');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    await dotenv.load(fileName: ".env");
-  } catch (e) {
-    AppLogger.warning('main', 'Failed to load .env file', e);
-  }
-
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Enable offline persistence so the app remains usable on poor connections.
-  // Firestore will serve from its local cache and sync when connectivity returns.
+  // Offline persistence keeps the app usable on poor connections: Firestore
+  // serves from its local cache and syncs when connectivity returns.
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
+
+  if (_useEmulator) {
+    AppLogger.warning('main', 'Using the Firebase emulators on $_emulatorHost');
+    FirebaseFirestore.instance.useFirestoreEmulator(_emulatorHost, 8080);
+    await FirebaseAuth.instance.useAuthEmulator(_emulatorHost, 9099);
+    await FirebaseStorage.instance.useStorageEmulator(_emulatorHost, 9199);
+  }
 
   try {
     await NotificationService().initNotifications();
@@ -47,7 +55,6 @@ void main() async {
   runApp(const TimeWiseApp());
 }
 
-
 class TimeWiseApp extends StatelessWidget {
   const TimeWiseApp({super.key});
 
@@ -56,7 +63,15 @@ class TimeWiseApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => TaskProvider()),
+        ChangeNotifierProvider(create: (_) => PreferencesProvider()),
+        // One shared task subscription, restarted whenever the signed-in user
+        // changes, and gated by the "Task Reminders" switch.
+        ChangeNotifierProxyProvider2<AuthProvider, PreferencesProvider, TaskProvider>(
+          create: (_) => TaskProvider(),
+          update: (_, auth, prefs, tasks) => tasks!
+            ..setRemindersEnabled(prefs.taskReminders)
+            ..attachUser(auth.currentUser?.uid),
+        ),
         ChangeNotifierProvider(create: (_) => ScheduleProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProxyProvider<TaskProvider, FocusProvider>(
@@ -68,16 +83,28 @@ class TimeWiseApp extends StatelessWidget {
         builder: (context, themeProvider, child) {
           if (!themeProvider.isReady) {
             return const MaterialApp(
-              home: Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              ),
+              debugShowCheckedModeBanner: false,
+              home: Scaffold(body: Center(child: CircularProgressIndicator())),
             );
           }
           return MaterialApp(
             title: 'TimeWise',
+            debugShowCheckedModeBanner: false,
             theme: AppTheme.light(accentColor: themeProvider.accentColor),
             darkTheme: AppTheme.dark(accentColor: themeProvider.accentColor),
             themeMode: themeProvider.themeMode,
+            // On tablets and landscape the content keeps a phone-like column
+            // instead of stretching across the whole screen.
+            builder: (context, child) => ColoredBox(
+              color: Theme.of(context).colorScheme.surface,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: child,
+                ),
+              ),
+            ),
             home: const AuthWrapper(),
           );
         },

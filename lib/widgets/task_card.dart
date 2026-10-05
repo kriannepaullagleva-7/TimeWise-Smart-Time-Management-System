@@ -1,259 +1,188 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
-import '../models/task.dart';
-import '../providers/focus_provider.dart';
-import '../screens/tasks/focus_screen.dart';
-import '../theme/app_colors.dart';
 
-class TaskCard extends StatefulWidget {
+import '../models/task.dart';
+import '../theme/app_styles.dart';
+import 'ui.dart';
+
+/// One task in a list: completion circle, title, deadline, metadata, badges and a menu.
+class TaskCard extends StatelessWidget {
   final Task task;
-  final VoidCallback onDelete;
   final VoidCallback onComplete;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
+  final VoidCallback onFocus;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   const TaskCard({
     required this.task,
-    required this.onDelete,
     required this.onComplete,
-    this.onTap,
+    required this.onTap,
+    required this.onFocus,
+    required this.onEdit,
+    required this.onDelete,
     super.key,
   });
 
-  @override
-  State<TaskCard> createState() => _TaskCardState();
-}
-
-class _TaskCardState extends State<TaskCard> {
-  Color _getPriorityColor() {
-    switch (widget.task.priority) {
-      case 3:
-        return const Color(0xFFEF4444);
-      case 2:
-        return const Color(0xFFF59E0B);
-      case 1:
-      default:
-        return const Color(0xFF10B981);
-    }
-  }
-
-  Color _getCategoryColor() {
-    final cat = widget.task.category.toLowerCase();
-    if (cat == 'school') return const Color(0xFF6366F1);
-    if (cat == 'work') return const Color(0xFF0EA5E9);
-    if (cat == 'personal') return const Color(0xFF10B981);
-    return const Color(0xFF8B5CF6);
-  }
-
   void _showMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final theme = Theme.of(context);
-        return Container(
-          margin: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: theme.colorScheme.outline),
+    showAppSheet<void>(
+      context,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SheetHeader(task.title),
+          if (!task.isCompleted)
+            SheetAction(
+              icon: Icons.timer_outlined,
+              title: 'Focus on task',
+              description: 'Start a ${task.estimatedMinutes}-minute focus session',
+              onTap: () {
+                Navigator.pop(ctx);
+                onFocus();
+              },
+            ),
+          SheetAction(
+            icon: Icons.edit_outlined,
+            title: 'Edit task',
+            onTap: () {
+              Navigator.pop(ctx);
+              onEdit();
+            },
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (!widget.task.isCompleted) ...[
-                ListTile(
-                  leading: const Icon(Icons.timer_outlined, color: AppColors.primary),
-                  title: const Text('Focus on task', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
-                  onTap: () {
-                    Navigator.pop(context);
-                    context.read<FocusProvider>().startFocus(widget.task);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const FocusScreen()));
-                  },
-                ),
-                Divider(height: 1, color: theme.colorScheme.outline),
-              ],
-              ListTile(
-                leading: Icon(Icons.edit_outlined, color: theme.colorScheme.onSurface),
-                title: Text('Edit task', style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold)),
-                onTap: () {
-                  Navigator.pop(context);
-                  widget.onTap?.call();
-                },
-              ),
-              Divider(height: 1, color: theme.colorScheme.outline),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
-                title: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
-                onTap: () {
-                  Navigator.pop(context);
-                  widget.onDelete();
-                },
-              ),
-            ],
+          SheetAction(
+            icon: Icons.delete_outline,
+            title: 'Delete',
+            color: ctx.cs.error,
+            onTap: () {
+              Navigator.pop(ctx);
+              onDelete();
+            },
           ),
-        );
-      },
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isCompleted = widget.task.isCompleted;
-    final pColor = _getPriorityColor();
-    final cColor = _getCategoryColor();
+    final isCompleted = task.isCompleted;
+    final pColor = priorityColor(task.priority);
+    final overdue = task.status == TaskStatus.overdue;
+    final timeFormat = DateFormat('MMM d, h:mm a');
+    final subtasksDone = task.subtasks.where((s) => s.isCompleted).length;
 
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.outline),
-        ),
-        child: Opacity(
-          opacity: isCompleted ? 0.7 : 1.0,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Opacity(
+        opacity: isCompleted ? 0.72 : 1.0,
+        child: AppCard(
+          color: context.cs.surface,
+          radius: AppRadius.md,
+          padding: EdgeInsets.zero,
+          onTap: onTap,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              GestureDetector(
-                onTap: widget.onComplete,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 12, top: 2),
-                  child: Container(
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isCompleted ? AppColors.primary : pColor,
-                        width: 2,
+              // 44 px tap area around the 22 px completion circle
+              Semantics(
+                button: true,
+                label: isCompleted ? 'Mark ${task.title} as not done' : 'Mark ${task.title} as done',
+                child: InkResponse(
+                  onTap: onComplete,
+                  radius: 26,
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Center(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: isCompleted ? context.primary : pColor, width: 2),
+                          color: isCompleted ? context.primary : Colors.transparent,
+                        ),
+                        child: isCompleted ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
                       ),
-                      color: isCompleted ? AppColors.primary : Colors.transparent,
                     ),
-                    alignment: Alignment.center,
-                    child: isCompleted
-                        ? const Icon(Icons.check, size: 12, color: Colors.white)
-                        : null,
                   ),
                 ),
               ),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.task.title,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onSurface,
-                        decoration: isCompleted ? TextDecoration.lineThrough : null,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.body.copyWith(
+                          fontWeight: FontWeight.w700,
+                          decoration: isCompleted ? TextDecoration.lineThrough : null,
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            timeFormat.format(task.deadline),
+                            style: context.label.copyWith(
+                              color: overdue ? readableOn(context.cs.error, context.cs.surface) : null,
+                              fontWeight: overdue ? FontWeight.w800 : FontWeight.w600,
+                            ),
+                          ),
+                          _meta(context, Icons.timer_outlined, '${task.estimatedMinutes}m'),
+                          if (task.subtasks.isNotEmpty)
+                            _meta(context, Icons.checklist, '$subtasksDone/${task.subtasks.length}'),
+                          if (task.reminderMinutesBefore != null)
+                            Icon(Icons.notifications_active_outlined, size: 14, color: context.cs.onSurfaceVariant),
+                          if (task.isRecurring)
+                            Icon(Icons.repeat, size: 14, color: context.cs.onSurfaceVariant),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    TintBadge(label: task.priorityText, color: pColor),
                     const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          DateFormat('MMM d, HH:mm').format(widget.task.deadline),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        Text(
-                          '⏱ ${widget.task.estimatedMinutes}m',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        if (widget.task.subtasks.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.list, size: 12, color: theme.colorScheme.onSurfaceVariant),
-                              const SizedBox(width: 2),
-                              Text(
-                                '${widget.task.subtasks.where((s) => s.isCompleted).length}/${widget.task.subtasks.length}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        if (widget.task.reminderMinutesBefore != null)
-                          Icon(Icons.notifications_active, size: 12, color: theme.colorScheme.onSurfaceVariant),
-                        if (widget.task.isRecurring)
-                          Icon(Icons.repeat, size: 12, color: theme.colorScheme.onSurfaceVariant),
-                      ],
-                    ),
+                    TintBadge(label: task.category, color: categoryColor(task.category)),
                   ],
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: pColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      widget.task.priorityText,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: pColor,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: cColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      widget.task.category,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: cColor,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _showMenu(context),
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.more_horiz,
-                    size: 20,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
+              IconButton(
+                tooltip: 'More actions',
+                onPressed: () => _showMenu(context),
+                icon: Icon(Icons.more_horiz, color: context.cs.onSurfaceVariant),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _meta(BuildContext context, IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: context.cs.onSurfaceVariant),
+        const SizedBox(width: 3),
+        Text(text, style: context.label),
+      ],
     );
   }
 }

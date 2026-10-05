@@ -3,140 +3,120 @@ import 'package:intl/intl.dart';
 
 import '../models/schedule.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_styles.dart';
+import 'ui.dart';
+
+/// Visual identity of a schedule row: color, icon and label by kind.
+class ScheduleKind {
+  final Color color;
+  final IconData icon;
+  final String label;
+  const ScheduleKind(this.color, this.icon, this.label);
+
+  static const _due = Color(0xFF8B5CF6);
+  static const _meal = Color(0xFFF97316);
+
+  static ScheduleKind of(ScheduleItem item) {
+    if (item.isTaskRow) return const ScheduleKind(_due, Icons.flag_outlined, 'Due');
+    if (item.isFixed) return ScheduleKind(AppColors.primary, Icons.lock_outline, 'Fixed');
+    if (item.isAISuggested) {
+      switch (item.type) {
+        case ScheduleTypes.breakTime:
+          return const ScheduleKind(AppColors.warning, Icons.coffee_outlined, 'AI break');
+        case ScheduleTypes.meal:
+          return const ScheduleKind(_meal, Icons.restaurant_outlined, 'AI meal');
+        default:
+          return const ScheduleKind(AppColors.secondary, Icons.auto_awesome, 'AI');
+      }
+    }
+    switch (item.type) {
+      case ScheduleTypes.breakTime:
+        return const ScheduleKind(AppColors.warning, Icons.coffee_outlined, 'Break');
+      case ScheduleTypes.meal:
+        return const ScheduleKind(_meal, Icons.restaurant_outlined, 'Meal');
+      case ScheduleTypes.exercise:
+        return const ScheduleKind(AppColors.success, Icons.fitness_center, 'Exercise');
+      default:
+        return ScheduleKind(AppColors.success, Icons.person_outline, ScheduleTypes.label(item.type));
+    }
+  }
+}
 
 class ScheduleItemCard extends StatelessWidget {
   final ScheduleItem item;
-  final VoidCallback? onDelete;
+  final VoidCallback? onTap;
 
-  const ScheduleItemCard({required this.item, this.onDelete, super.key});
+  /// Finished items are dimmed on the calendar; a plan being reviewed is not.
+  final bool dimPast;
 
-  Color _getBackgroundColor() {
-    if (item.isFixed) return AppColors.primary.withValues(alpha: 0.1);
-    if (item.isAISuggested) return AppColors.secondary.withValues(alpha: 0.1);
-    if (item.type == 'break') return const Color(0xFFF59E0B).withValues(alpha: 0.1);
-    return const Color(0xFF22C55E).withValues(alpha: 0.1); // Personal/Available
-  }
-
-  Color _getAccentColor() {
-    if (item.isFixed) return AppColors.primary;
-    if (item.isAISuggested) return AppColors.secondary;
-    if (item.type == 'break') return const Color(0xFFF59E0B);
-    return const Color(0xFF22C55E); // Personal/Available
-  }
-
-  String _getTypeLabel() {
-    if (item.isFixed) return '🔒 Fixed';
-    if (item.isAISuggested) return '✨ AI';
-    if (item.type == 'break') return '☕ Break';
-    return '👤 Personal';
-  }
-
-  void _showMenu(BuildContext context) {
-    if (onDelete == null) return;
-    
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final theme = Theme.of(context);
-        return Container(
-          margin: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: theme.colorScheme.outline),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
-                title: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
-                onTap: () {
-                  Navigator.pop(context);
-                  onDelete!();
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  const ScheduleItemCard({required this.item, this.onTap, this.dimPast = true, super.key});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final kind = ScheduleKind.of(item);
     final timeFormat = DateFormat('h:mm a');
-    final bg = _getBackgroundColor();
-    final accent = _getAccentColor();
-    final now = DateTime.now();
-    final isPast = now.isAfter(item.endTime);
+    final isPast = dimPast && !item.isTaskRow && DateTime.now().isAfter(item.endTime);
+    final timeText = item.isTaskRow
+        ? 'Due ${timeFormat.format(item.startTime)} · ${item.duration.inMinutes}m'
+        : '${timeFormat.format(item.startTime)} – ${timeFormat.format(item.endTime)} · ${item.duration.inMinutes}m';
 
-    return GestureDetector(
-      onTap: onDelete != null ? () => _showMenu(context) : null,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: accent.withValues(alpha: 0.3)),
-        ),
-        child: Opacity(
-          opacity: isPast ? 0.6 : 1.0,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 2,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: accent,
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Opacity(
+        opacity: isPast ? 0.65 : 1.0,
+        child: Semantics(
+          button: onTap != null,
+          label: '${item.title}, ${kind.label}, $timeText',
+          child: Material(
+            color: kind.color.withValues(alpha: context.isDark ? 0.16 : 0.10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              side: BorderSide(color: kind.color.withValues(alpha: 0.30)),
+            ),
+            child: InkWell(
+              customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
                   children: [
-                    Text(
-                      item.title,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        color: theme.colorScheme.onSurface,
+                    Container(
+                      width: 4,
+                      height: 38,
+                      decoration: BoxDecoration(color: kind.color, borderRadius: BorderRadius.circular(2)),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.body.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(timeText, style: context.label),
+                          if (item.note != null && item.note!.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                item.note!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.label.copyWith(fontStyle: FontStyle.italic, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${timeFormat.format(item.startTime)} - ${timeFormat.format(item.endTime)} · ${item.duration.inMinutes}m',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                    const SizedBox(width: 8),
+                    TintBadge(label: kind.label, color: kind.color, icon: kind.icon),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _getTypeLabel(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: accent,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

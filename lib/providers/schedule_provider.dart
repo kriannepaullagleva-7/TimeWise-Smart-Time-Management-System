@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/recurrence.dart';
 import '../models/schedule.dart';
 import '../models/task.dart';
 import '../models/user.dart';
-import '../repositories/schedule_repository.dart';
 import '../repositories/impl/firestore_schedule_repository.dart';
+import '../repositories/schedule_repository.dart';
 import '../services/ai_service.dart';
+import '../utils/app_exceptions.dart';
 import '../utils/app_logger.dart';
+import 'task_provider.dart';
 
-/// Thrown when a new/edited schedule item overlaps an existing fixed event.
-class ScheduleConflictException implements Exception {
-  final String message;
-  ScheduleConflictException(this.message);
-  @override
-  String toString() => message;
-}
+export '../utils/app_exceptions.dart' show ScheduleConflictException;
 
 class ScheduleProvider extends ChangeNotifier {
   static const _module = 'ScheduleProvider';
@@ -40,35 +37,50 @@ class ScheduleProvider extends ChangeNotifier {
 
   // ── Streams ──────────────────────────────────────────────────────────────
 
-  Stream<List<ScheduleItem>> getUserScheduleStream(
-    String userId,
-    DateTime date,
-  ) =>
-      _repo.watchDay(userId, date);
+  Stream<List<ScheduleItem>> watchDay(String userId, DateTime date) => _repo.watchDay(userId, date);
 
-  // ── Conflict Check ───────────────────────────────────────────────────────
+  Stream<List<ScheduleItem>> watchRange(String userId, DateTime start, DateTime end) =>
+      _repo.watchRange(userId, start, end);
 
-  Future<void> _assertNoFixedConflict(
+  // ── Conflict check ───────────────────────────────────────────────────────
+
+  /// Throws when any of the [starts]/[duration] windows overlaps an item the
+  /// user created. AI-suggested blocks do not count: the AI plans around the
+  /// user's events, never the other way round. One range query covers the whole
+  /// series instead of one query per occurrence.
+  Future<void> _assertNoConflict(
     String userId,
-    DateTime start,
-    DateTime end, {
+    List<DateTime> starts,
+    Duration duration, {
     String? excludeItemId,
   }) async {
-    final existing = await _repo.fetchDay(userId, start);
-    final candidate = ScheduleItem(
-      id: 'candidate',
-      userId: userId,
-      title: '',
-      startTime: start,
-      endTime: end,
-      type: ScheduleTypes.personal,
-    );
-    for (final item in existing) {
-      if (item.id == excludeItemId) continue;
-      if (candidate.overlapsWith(item)) {
-        throw ScheduleConflictException(
-          'This overlaps with "${item.title}" (${_fmtRange(item)}).',
-        );
+    if (starts.isEmpty) return;
+    final first = starts.reduce((a, b) => a.isBefore(b) ? a : b);
+    final last = starts.reduce((a, b) => a.isAfter(b) ? a : b);
+    final rangeStart = DateTime(first.year, first.month, first.day);
+    final rangeEnd = DateTime(last.year, last.month, last.day + 1);
+
+    final existing = (await _repo.fetchRange(userId, rangeStart, rangeEnd))
+        .where((i) => !i.isAISuggested && i.id != excludeItemId)
+        .toList();
+
+    final isSeries = starts.length > 1;
+    for (final start in starts) {
+      final candidate = ScheduleItem(
+        id: 'candidate',
+        userId: userId,
+        title: '',
+        startTime: start,
+        endTime: start.add(duration),
+        type: ScheduleTypes.personal,
+      );
+      for (final item in existing) {
+        if (candidate.overlapsWith(item)) {
+          final when = isSeries ? ' on ${DateFormat('EEE, MMM d').format(start)}' : '';
+          throw ScheduleConflictException(
+            'This overlaps with "${item.title}" (${_fmtRange(item)})$when.',
+          );
+        }
       }
     }
   }
@@ -88,33 +100,27 @@ class ScheduleProvider extends ChangeNotifier {
     required DateTime endTime,
     required String type,
     RecurrenceRule recurrence = RecurrenceRule.none,
+    bool isFixed = true,
+    String? note,
   }) async {
     if (!endTime.isAfter(startTime)) {
-      throw ScheduleConflictException('End time must be after start time.');
+      throw const ScheduleConflictException('End time must be after start time.');
     }
 
     final duration = endTime.difference(startTime);
     final startTimeOfDay = TimeOfDay.fromDateTime(startTime);
     final dates = recurrence.occurrencesFrom(startTime);
-
-    final occurrenceStarts = dates.map((date) {
-      return DateTime(
-        date.year,
-        date.month,
-        date.day,
-        startTimeOfDay.hour,
-        startTimeOfDay.minute,
-      );
-    }).toList();
+    final occurrenceStarts = dates
+        .map((d) => DateTime(d.year, d.month, d.day, startTimeOfDay.hour, startTimeOfDay.minute))
+        .toList();
 
     // Validate conflicts before writing anything.
-    for (final start in occurrenceStarts) {
-      await _assertNoFixedConflict(userId, start, start.add(duration));
-    }
+    await _assertNoConflict(userId, occurrenceStarts, duration);
 
     _begin();
     try {
       final seriesId = _repo.newId();
+      final cleanNote = (note == null || note.trim().isEmpty) ? null : note.trim();
       final items = [
         for (var i = 0; i < occurrenceStarts.length; i++)
           ScheduleItem(
@@ -124,7 +130,8 @@ class ScheduleProvider extends ChangeNotifier {
             startTime: occurrenceStarts[i],
             endTime: occurrenceStarts[i].add(duration),
             type: type,
-            isFixed: true,
+            isFixed: isFixed,
+            note: cleanNote,
             recurrenceId: recurrence.isRecurring ? seriesId : null,
             recurrence: recurrence,
           ),
@@ -144,6 +151,48 @@ class ScheduleProvider extends ChangeNotifier {
     }
   }
 
+  /// Edits ONE occurrence (the series link is kept).
+  Future<void> updateEvent(
+    ScheduleItem original, {
+    required String title,
+    required DateTime startTime,
+    required DateTime endTime,
+    required String type,
+    String? note,
+    bool? isFixed,
+  }) async {
+    if (!endTime.isAfter(startTime)) {
+      throw const ScheduleConflictException('End time must be after start time.');
+    }
+    await _assertNoConflict(
+      original.userId,
+      [startTime],
+      endTime.difference(startTime),
+      excludeItemId: original.id,
+    );
+
+    _begin();
+    try {
+      final cleanNote = (note == null || note.trim().isEmpty) ? null : note.trim();
+      await _repo.update(
+        original.copyWith(
+          title: title,
+          startTime: startTime,
+          endTime: endTime,
+          type: type,
+          isFixed: isFixed,
+          note: cleanNote,
+          clearNote: cleanNote == null,
+        ),
+      );
+    } catch (e, st) {
+      _setError('Could not update event. Please try again.', e, st);
+      rethrow;
+    } finally {
+      _end();
+    }
+  }
+
   Future<void> deleteScheduleItem(String scheduleId) async {
     _begin();
     try {
@@ -157,10 +206,10 @@ class ScheduleProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> deleteScheduleSeries(String recurrenceId) async {
+  Future<void> deleteScheduleSeries(String userId, String recurrenceId) async {
     _begin();
     try {
-      await _repo.deleteSeries(recurrenceId);
+      await _repo.deleteSeries(userId, recurrenceId);
       AppLogger.info(_module, 'deleteScheduleSeries: $recurrenceId');
     } catch (e, st) {
       _setError('Could not delete event series. Please try again.', e, st);
@@ -170,22 +219,31 @@ class ScheduleProvider extends ChangeNotifier {
     }
   }
 
-  // ── AI (Future Development) ────────────────────────────────────────────────
+  // ── AI schedule ────────────────────────────────────────────────────────────
 
+  /// Asks the AI for a plan for [scheduleDate]. Only tasks worth planning that
+  /// day are sent (see [TaskProvider.planningCandidates]).
   Future<List<ScheduleItem>> generateAISchedulePreview({
     required String userId,
     required List<Task> tasks,
     required DateTime scheduleDate,
     required UserModel user,
   }) async {
+    if (!_aiService.isConfigured) {
+      throw const AIConfigException(
+        'The AI Schedule Assistant is not set up yet. Run the app with '
+        '--dart-define=GEMINI_API_KEY=your_key to turn it on.',
+      );
+    }
     _isGeneratingSchedule = true;
     notifyListeners();
     try {
       final allItems = await _repo.fetchDay(userId, scheduleDate);
       final fixedEvents = allItems.where((i) => i.isFixed).toList();
+      final candidates = TaskProvider.planningCandidates(tasks, scheduleDate);
       return await _aiService.generateSchedule(
         userId: userId,
-        tasks: tasks,
+        tasks: candidates,
         scheduleDate: scheduleDate,
         fixedEvents: fixedEvents,
         user: user,
@@ -196,6 +254,8 @@ class ScheduleProvider extends ChangeNotifier {
     }
   }
 
+  /// Saves the reviewed plan: replaces the day's earlier AI blocks with
+  /// [items] in one atomic batch.
   Future<void> acceptGeneratedSchedule(
     String userId,
     DateTime scheduleDate,
@@ -203,22 +263,22 @@ class ScheduleProvider extends ChangeNotifier {
   ) async {
     _begin();
     try {
-      await _repo.clearFlexible(userId, scheduleDate);
-      for (final item in items) {
-        final withId = ScheduleItem(
-          id: _repo.newId(),
-          userId: item.userId,
-          title: item.title,
-          startTime: item.startTime,
-          endTime: item.endTime,
-          type: item.type,
-          taskId: item.taskId,
-          isAISuggested: true,
-          isFixed: false,
-          note: item.note,
-        );
-        await _repo.add(withId);
-      }
+      final withIds = [
+        for (final item in items)
+          ScheduleItem(
+            id: _repo.newId(),
+            userId: userId,
+            title: item.title,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            type: item.type,
+            taskId: item.taskId,
+            isAISuggested: true,
+            isFixed: false,
+            note: item.note,
+          ),
+      ];
+      await _repo.replaceAiSuggestions(userId, scheduleDate, withIds);
     } catch (e, st) {
       _setError('Could not save schedule. Please try again.', e, st);
       rethrow;

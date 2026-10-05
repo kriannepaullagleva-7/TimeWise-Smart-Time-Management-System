@@ -7,8 +7,13 @@ import 'app_colors.dart';
 class AppTheme {
   AppTheme._();
 
-  static ThemeData light({Color? accentColor}) => _build(AppColors.lightColorScheme.copyWith(primary: accentColor, primaryContainer: accentColor));
-  static ThemeData dark({Color? accentColor}) => _build(AppColors.darkColorScheme.copyWith(primary: accentColor, primaryContainer: accentColor));
+  static ThemeData light({Color? accentColor}) => _build(_scheme(AppColors.lightColorScheme, accentColor));
+  static ThemeData dark({Color? accentColor}) => _build(_scheme(AppColors.darkColorScheme, accentColor));
+
+  static ColorScheme _scheme(ColorScheme base, Color? accent) {
+    if (accent == null) return base;
+    return base.copyWith(primary: accent, primaryContainer: accent, onPrimary: Colors.white);
+  }
 
   static ThemeData _build(ColorScheme colorScheme) {
     return ThemeData(
@@ -69,6 +74,14 @@ class AppTheme {
         ),
       ),
 
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        ),
+      ),
+
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
@@ -80,7 +93,9 @@ class AppTheme {
 
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
+          minimumSize: const Size(48, 44),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
         ),
       ),
 
@@ -98,6 +113,37 @@ class AppTheme {
         side: BorderSide.none,
       ),
 
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? Colors.white : colorScheme.onSurfaceVariant,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? colorScheme.primary
+              : colorScheme.surfaceContainerHighest,
+        ),
+        trackOutlineColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? Colors.transparent : colorScheme.onSurfaceVariant,
+        ),
+      ),
+
+      checkboxTheme: CheckboxThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        fillColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? colorScheme.primary : Colors.transparent,
+        ),
+        side: BorderSide(color: colorScheme.onSurfaceVariant, width: 1.5),
+      ),
+
+      sliderTheme: SliderThemeData(
+        activeTrackColor: colorScheme.primary,
+        inactiveTrackColor: colorScheme.outline,
+        thumbColor: colorScheme.primary,
+        trackHeight: 4,
+      ),
+
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: colorScheme.primary),
+
       navigationBarTheme: NavigationBarThemeData(
         height: 66,
         backgroundColor: colorScheme.surfaceContainer,
@@ -108,11 +154,20 @@ class AppTheme {
       ),
 
       floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: colorScheme.primary,
+        foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
 
       dialogTheme: DialogThemeData(
+        backgroundColor: colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: false,
       ),
 
       snackBarTheme: SnackBarThemeData(
@@ -126,6 +181,15 @@ class AppTheme {
       ),
 
       dividerTheme: DividerThemeData(color: colorScheme.outlineVariant),
+
+      tooltipTheme: TooltipThemeData(
+        waitDuration: const Duration(milliseconds: 600),
+        textStyle: TextStyle(fontSize: 12, color: colorScheme.surface),
+        decoration: BoxDecoration(
+          color: colorScheme.onSurface.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
     );
   }
 }

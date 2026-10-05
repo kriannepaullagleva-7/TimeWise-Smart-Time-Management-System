@@ -1,29 +1,46 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
-import '../../providers/auth_provider.dart';
-import '../../providers/task_provider.dart';
 import '../../models/recurrence.dart';
 import '../../models/task.dart';
-import '../../theme/app_colors.dart';
+import '../../models/user.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/task_provider.dart';
+import '../../theme/app_styles.dart';
+import '../../utils/feedback.dart';
 import '../../widgets/recurrence_rule_picker.dart';
+import '../../widgets/ui.dart';
 
-const List<_ReminderOption> _reminderOptions = [
-  _ReminderOption(null, 'No reminder'),
-  _ReminderOption(15, '15 minutes before'),
-  _ReminderOption(60, '1 hour before'),
-  _ReminderOption(180, '3 hours before'),
-  _ReminderOption(1440, '1 day before'),
+const _reminderChoices = <(int?, String)>[
+  (null, 'None'),
+  (15, '15 min before'),
+  (60, '1 hour before'),
+  (180, '3 hours before'),
+  (1440, '1 day before'),
 ];
 
-class _ReminderOption {
-  final int? minutes;
-  final String label;
-  const _ReminderOption(this.minutes, this.label);
+const _durationChoices = [15, 30, 45, 60, 90, 120, 180];
+const _minMinutes = 5;
+const _maxMinutes = 720;
+
+String _formatMinutes(int m) {
+  if (m < 60) return '$m min';
+  final h = m ~/ 60;
+  final r = m % 60;
+  return r == 0 ? '$h h' : '$h h $r min';
 }
 
+String _reminderLabel(int minutes) {
+  for (final (value, label) in _reminderChoices) {
+    if (value == minutes) return label;
+  }
+  return '${_formatMinutes(minutes)} before';
+}
+
+/// Create a task, or edit one (pass [task]). Editing a repeating task changes
+/// only that occurrence.
 class AddTaskScreen extends StatefulWidget {
   final Task? task;
 
@@ -35,659 +52,351 @@ class AddTaskScreen extends StatefulWidget {
 
 class _AddTaskScreenState extends State<AddTaskScreen> {
   late final _titleController = TextEditingController(text: widget.task?.title);
-  late final _descriptionController =
-      TextEditingController(text: widget.task?.description);
-  late final _durationController = TextEditingController(
-    text: (widget.task?.estimatedMinutes ?? 60).toString(),
-  );
+  late final _descriptionController = TextEditingController(text: widget.task?.description);
+  final _subtaskController = TextEditingController();
 
-  late DateTime _selectedDeadline =
-      widget.task?.deadline ?? DateTime.now().add(const Duration(days: 1));
-  late TimeOfDay _selectedTime = widget.task != null
-      ? TimeOfDay.fromDateTime(widget.task!.deadline)
-      : const TimeOfDay(hour: 18, minute: 0);
-  
-  late int _selectedPriority = widget.task?.priority ?? 2;
-  late String _selectedCategory = widget.task?.category ?? 'School';
-  late int? _reminderMinutes = widget.task?.reminderMinutesBefore;
-  RecurrenceRule _recurrenceRule = RecurrenceRule.none;
-  late bool _recurring = widget.task?.recurrenceId != null;
-  late List<Subtask> _subtasks = widget.task?.subtasks.toList() ?? [];
+  late DateTime _deadlineDate = widget.task?.deadline ?? DateTime.now().add(const Duration(days: 1));
+  late TimeOfDay _deadlineTime =
+      widget.task != null ? TimeOfDay.fromDateTime(widget.task!.deadline) : const TimeOfDay(hour: 18, minute: 0);
+  late int _minutes = widget.task?.estimatedMinutes ?? 60;
+  late int _priority = widget.task?.priority ?? 2;
+  String? _categoryChoice;
+  late int? _reminder = widget.task?.reminderMinutesBefore;
+  late final List<Subtask> _subtasks = widget.task?.subtasks.toList() ?? [];
+  bool _repeats = false;
+  RecurrenceRule _rule = const RecurrenceRule(frequency: RecurrenceFrequency.weekly);
 
-  bool _submitted = false;
+  bool _attempted = false;
   bool _isSaving = false;
 
-  bool get _isEditing => widget.task != null;
-  bool get _isEditingSeriesMember => widget.task?.recurrenceId != null;
+  bool get _editing => widget.task != null;
 
-  final List<String> _categories = ['School', 'Work', 'Personal', 'Fitness', 'Other'];
+  List<String> _userCategories(UserModel? user) =>
+      (user?.categories.isNotEmpty ?? false) ? user!.categories : kDefaultCategories;
+
+  /// The tapped category, else the edited task's own, else the user's first.
+  String _category(List<String> categories) => _categoryChoice ?? widget.task?.category ?? categories.first;
+
+  DateTime get _deadline => DateTime(
+        _deadlineDate.year,
+        _deadlineDate.month,
+        _deadlineDate.day,
+        _deadlineTime.hour,
+        _deadlineTime.minute,
+      );
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _durationController.dispose();
+    _subtaskController.dispose();
     super.dispose();
   }
 
-  Future<void> _selectDeadlineDate() async {
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final earliest = _deadlineDate.isBefore(now) ? _deadlineDate : now.subtract(const Duration(days: 1));
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDeadline,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 3650)),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.primary,
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
-          ),
-          child: child!,
-        );
-      },
+      initialDate: _deadlineDate,
+      firstDate: DateTime(earliest.year, earliest.month, earliest.day),
+      lastDate: now.add(const Duration(days: 3650)),
     );
-    if (picked != null) {
-      setState(() => _selectedDeadline = picked);
-    }
+    if (picked != null) setState(() => _deadlineDate = picked);
   }
 
-  Future<void> _selectDeadlineTime() async {
-    final picked = await showTimePicker(
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(context: context, initialTime: _deadlineTime);
+    if (picked != null) setState(() => _deadlineTime = picked);
+  }
+
+  Future<void> _pickCustomDuration() async {
+    final result = await showDialog<int>(
       context: context,
-      initialTime: _selectedTime,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.primary,
-              onPrimary: Colors.white,
-              onSurface: Colors.black,
-            ),
-          ),
-          child: child!,
-        );
-      },
+      builder: (_) => _CustomDurationDialog(initialMinutes: _minutes),
     );
-    if (picked != null) {
-      setState(() => _selectedTime = picked);
-    }
+    if (result != null) setState(() => _minutes = result);
   }
 
-  void _save() async {
-    if (_isSaving) return;
-    
-    final title = _titleController.text.trim();
+  void _addSubtask() {
+    final title = _subtaskController.text.trim();
     if (title.isEmpty) return;
+    setState(() {
+      _subtasks.add(Subtask(id: DateTime.now().microsecondsSinceEpoch.toString(), title: title));
+      _subtaskController.clear();
+    });
+  }
+
+  Future<void> _save() async {
+    setState(() => _attempted = true);
+    final title = _titleController.text.trim();
+    if (title.isEmpty || _isSaving) return;
+
+    final user = context.read<AuthProvider>().currentUser;
+    if (user == null) return;
+    final provider = context.read<TaskProvider>();
+
+    // A subtask typed but not yet added would be lost on save.
+    if (_subtaskController.text.trim().isNotEmpty) _addSubtask();
 
     setState(() => _isSaving = true);
-
-    final duration = int.tryParse(_durationController.text) ?? 60;
-
-    final authProvider = context.read<AuthProvider>();
-    final taskProvider = context.read<TaskProvider>();
-    final userId = authProvider.currentUser?.uid ?? '';
-
-    final deadline = DateTime(
-      _selectedDeadline.year,
-      _selectedDeadline.month,
-      _selectedDeadline.day,
-      _selectedTime.hour,
-      _selectedTime.minute,
-    );
-
-    final task = Task(
-      id: widget.task?.id ?? taskProvider.newTaskId(),
-      userId: userId,
-      title: title,
-      description: _descriptionController.text.trim(),
-      deadline: deadline,
-      priority: _selectedPriority,
-      category: _selectedCategory,
-      estimatedMinutes: duration,
-      isCompleted: widget.task?.isCompleted ?? false,
-      createdAt: widget.task?.createdAt ?? DateTime.now(),
-      reminderMinutesBefore: _reminderMinutes,
-      subtasks: _subtasks,
-    );
-
-    if (_isEditing) {
-      await taskProvider.updateTask(task);
-    } else if (_recurring && _recurrenceRule.isRecurring) {
-      await taskProvider.addRecurringTask(task, _recurrenceRule);
-    } else {
-      await taskProvider.addTask(task);
-    }
-
-    if (mounted) {
-      setState(() => _submitted = true);
-      Future.delayed(const Duration(milliseconds: 1200), () {
-        if (mounted) Navigator.pop(context);
-      });
-    }
-  }
-
-  Color _getPriorityColor(int priority) {
-    switch (priority) {
-      case 3: return const Color(0xFFEF4444);
-      case 2: return const Color(0xFFF59E0B);
-      default: return const Color(0xFF22C55E);
-    }
-  }
-
-  String _getPriorityLabel(int priority) {
-    switch (priority) {
-      case 3: return 'High';
-      case 2: return 'Medium';
-      default: return 'Low';
+    try {
+      if (_editing) {
+        // Start from the live copy so focus time, completion and series
+        // fields written elsewhere are kept.
+        final current = provider.byId(widget.task!.id) ?? widget.task!;
+        await provider.updateTask(
+          current.copyWith(
+            title: title,
+            description: _descriptionController.text.trim(),
+            deadline: _deadline,
+            priority: _priority,
+            category: _category(_userCategories(user)),
+            estimatedMinutes: _minutes,
+            reminderMinutesBefore: _reminder,
+            clearReminder: _reminder == null,
+            subtasks: _subtasks,
+          ),
+        );
+      } else {
+        final task = Task(
+          id: provider.newTaskId(),
+          userId: user.uid,
+          title: title,
+          description: _descriptionController.text.trim(),
+          deadline: _deadline,
+          priority: _priority,
+          category: _category(_userCategories(user)),
+          estimatedMinutes: _minutes,
+          createdAt: DateTime.now(),
+          reminderMinutesBefore: _reminder,
+          subtasks: _subtasks,
+        );
+        if (_repeats && _rule.isRecurring) {
+          await provider.addRecurringTask(task, _rule);
+        } else {
+          await provider.addTask(task);
+        }
+      }
+      if (!mounted) return;
+      showMessage(context, _editing ? 'Task updated' : (_repeats ? 'Repeating task created' : 'Task added'));
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) showMessage(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    if (_submitted) {
-      return Scaffold(
-        backgroundColor: theme.colorScheme.surface,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 80,
-                height: 80,
-                decoration: const BoxDecoration(
-                  gradient: AppColors.btnGradient,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check, color: Colors.white, size: 40),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                _isEditing ? 'Task Updated!' : 'Task Added!',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: theme.colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '"${_titleController.text.trim()}" has been saved.',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    final user = context.watch<AuthProvider>().currentUser;
+    final userCategories = _userCategories(user);
+    final selectedCategory = _category(userCategories);
+    final categories = <String>[
+      ...userCategories,
+      if (!userCategories.contains(selectedCategory)) selectedCategory,
+    ];
+    final durations = {..._durationChoices, _minutes}.toList()..sort();
+    final titleError = _attempted && _titleController.text.trim().isEmpty ? 'Give the task a name.' : null;
+    final inPast = _deadline.isBefore(DateTime.now());
+    final reminderChoices = [
+      ..._reminderChoices,
+      if (_reminder != null && !_reminderChoices.any((c) => c.$1 == _reminder)) (_reminder, _reminderLabel(_reminder!)),
+    ];
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-              child: Row(
+            ScreenHeader(title: _editing ? 'Edit Task' : 'Add Task'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.page, 4, AppSpacing.page, 24),
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: theme.colorScheme.outline),
-                      ),
-                      child: Icon(Icons.arrow_back, color: theme.colorScheme.onSurface, size: 20),
-                    ),
+                  LabeledField(
+                    label: 'Task name',
+                    hint: 'e.g. Research paper',
+                    controller: _titleController,
+                    icon: Icons.edit_outlined,
+                    textCapitalization: TextCapitalization.sentences,
+                    textInputAction: TextInputAction.next,
+                    maxLength: 100,
+                    errorText: titleError,
+                    onChanged: (_) => setState(() {}),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      _isEditing ? 'Edit Task' : 'Add New Task',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        color: theme.colorScheme.onSurface,
+                  const SizedBox(height: 16),
+                  LabeledField(
+                    label: 'Description (optional)',
+                    hint: 'What needs to be done?',
+                    controller: _descriptionController,
+                    maxLines: 3,
+                    maxLength: 500,
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 6,
+                        child: PickerField(
+                          label: 'Deadline',
+                          value: DateFormat('MMM d, yyyy').format(_deadlineDate),
+                          icon: Icons.calendar_today_outlined,
+                          onTap: _pickDate,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 5,
+                        child: PickerField(
+                          label: 'Time',
+                          value: _deadlineTime.format(context),
+                          icon: Icons.access_time,
+                          onTap: _pickTime,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (inPast)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, left: 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, size: 16, color: readableOn(context.cs.error, context.cs.surface)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'This deadline has passed, so the task will show as overdue.',
+                              style: context.label.copyWith(color: readableOn(context.cs.error, context.cs.surface)),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                  const SizedBox(height: 16),
+                  const SectionLabel('Estimated time'),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final m in durations)
+                        PillChip(label: _formatMinutes(m), selected: _minutes == m, onTap: () => setState(() => _minutes = m)),
+                      PillChip(label: 'Custom…', selected: false, onTap: _pickCustomDuration),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const SectionLabel('Priority'),
+                  Row(
+                    children: [
+                      for (final p in [3, 2, 1]) ...[
+                        Expanded(
+                          child: _PriorityOption(
+                            priority: p,
+                            selected: _priority == p,
+                            onTap: () => setState(() => _priority = p),
+                          ),
+                        ),
+                        if (p != 1) const SizedBox(width: 8),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const SectionLabel('Category'),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final c in categories)
+                        PillChip(label: c, selected: selectedCategory == c, onTap: () => setState(() => _categoryChoice = c)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const SectionLabel('Reminder'),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final (value, label) in reminderChoices)
+                        PillChip(label: label, selected: _reminder == value, onTap: () => setState(() => _reminder = value)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (!_editing) ...[
+                    SwitchRow(
+                      icon: Icons.repeat,
+                      title: 'Repeat',
+                      subtitle: 'Create this task on several days.',
+                      value: _repeats,
+                      onChanged: (v) => setState(() {
+                        _repeats = v;
+                        if (v && !_rule.isRecurring) _rule = const RecurrenceRule(frequency: RecurrenceFrequency.weekly);
+                      }),
+                    ),
+                    if (_repeats) ...[
+                      const SizedBox(height: 12),
+                      AppCard(
+                        child: RecurrenceRulePicker(
+                          value: _rule.frequency == RecurrenceFrequency.weekly && _rule.daysOfWeek.isEmpty
+                              ? _rule.copyWith(daysOfWeek: {_deadlineDate.weekday})
+                              : _rule,
+                          firstDate: _deadlineDate,
+                          onChanged: (r) => setState(() => _rule = r),
+                        ),
+                      ),
+                    ],
+                  ] else if (widget.task!.isRecurring)
+                    Row(
+                      children: [
+                        Icon(Icons.repeat, size: 16, color: context.cs.onSurfaceVariant),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Part of a repeating series. Changes here only affect this occurrence.',
+                            style: context.label,
+                          ),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 16),
+                  const SectionLabel('Subtasks'),
+                  for (var i = 0; i < _subtasks.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: AppCard(
+                        padding: const EdgeInsets.only(left: 14, right: 4),
+                        radius: AppRadius.sm,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                child: Text(_subtasks[i].title, style: context.body),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Remove subtask',
+                              icon: Icon(Icons.close, size: 20, color: context.cs.onSurfaceVariant),
+                              onPressed: () => setState(() => _subtasks.removeAt(i)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  LabeledFieldInline(
+                    controller: _subtaskController,
+                    hint: 'Add a step…',
+                    onAdd: _addSubtask,
                   ),
                 ],
               ),
             ),
-
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildFormField(
-                      label: 'Task Name',
-                      hint: 'e.g. Research Paper',
-                      controller: _titleController,
-                      onChanged: (v) => setState(() {}),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildFormField(
-                      label: 'Description',
-                      hint: 'What needs to be done?',
-                      controller: _descriptionController,
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Grid for Date & Time
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildFormField(
-                            label: 'Deadline',
-                            hint: DateFormat('MMM d, yyyy').format(_selectedDeadline),
-                            icon: Icons.calendar_today,
-                            onTap: _selectDeadlineDate,
-                            readOnly: true,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildFormField(
-                            label: 'Time',
-                            hint: _selectedTime.format(context),
-                            icon: Icons.access_time,
-                            onTap: _selectDeadlineTime,
-                            readOnly: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    _buildFormField(
-                      label: 'Duration (mins)',
-                      hint: 'e.g. 60',
-                      icon: Icons.timer_outlined,
-                      controller: _durationController,
-                      keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Priority
-                    Text(
-                      'PRIORITY',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.5,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [3, 2, 1].map((p) {
-                        final isSelected = _selectedPriority == p;
-                        final color = _getPriorityColor(p);
-                        return Expanded(
-                          child: GestureDetector(
-                            onTap: () => setState(() => _selectedPriority = p),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              margin: EdgeInsets.only(right: p == 1 ? 0 : 8),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: isSelected ? color.withValues(alpha: 0.12) : theme.colorScheme.surfaceContainer,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: isSelected ? color : theme.colorScheme.outline,
-                                  width: 1.5,
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                _getPriorityLabel(p),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w900,
-                                  color: isSelected ? color : theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Category
-                    Text(
-                      'CATEGORY',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.5,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _categories.map((c) {
-                        final isSelected = _selectedCategory == c;
-                        return GestureDetector(
-                          onTap: () => setState(() => _selectedCategory = c),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isSelected ? AppColors.primary : theme.colorScheme.surfaceContainer,
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(
-                                color: isSelected ? Colors.transparent : theme.colorScheme.outline,
-                              ),
-                            ),
-                            child: Text(
-                              c,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: isSelected ? Colors.white : theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Reminder
-                    _buildDropdownField(
-                      label: 'Reminder',
-                      icon: Icons.notifications_none,
-                      value: _reminderMinutes,
-                      items: _reminderOptions.map((o) {
-                        return DropdownMenuItem(value: o.minutes, child: Text(o.label));
-                      }).toList(),
-                      onChanged: (val) => setState(() => _reminderMinutes = val),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Recurring Box
-                    if (!_isEditing)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Recurring Task',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.bold,
-                                        color: theme.colorScheme.onSurface,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Repeat this task automatically',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: theme.colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                CupertinoSwitch(
-                                  value: _recurring,
-                                  onChanged: (v) => setState(() {
-                                    _recurring = v;
-                                    if (v && _recurrenceRule == RecurrenceRule.none) {
-                                      _recurrenceRule = const RecurrenceRule(frequency: RecurrenceFrequency.weekly);
-                                    }
-                                  }),
-                                  activeTrackColor: AppColors.primary,
-                                ),
-                              ],
-                            ),
-                            if (_recurring) ...[
-                              const SizedBox(height: 16),
-                              RecurrenceRulePicker(
-                                value: _recurrenceRule,
-                                firstDate: _selectedDeadline,
-                                onChanged: (r) => setState(() => _recurrenceRule = r),
-                              ),
-                            ],
-                          ],
-                        ),
-                      )
-                    else if (_isEditingSeriesMember)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainer,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: theme.colorScheme.outline),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.repeat, size: 20, color: theme.colorScheme.onSurfaceVariant),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Part of a repeating series. Changes here only affect this occurrence.',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    
-                    const SizedBox(height: 16),
-
-                    // Subtasks dummy placeholder
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'SUBTASKS',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.5,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            String newTitle = '';
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Add Subtask'),
-                                content: TextField(
-                                  autofocus: true,
-                                  decoration: const InputDecoration(hintText: 'Subtask title...'),
-                                  onChanged: (v) => newTitle = v,
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () {
-                                      if (newTitle.trim().isNotEmpty) {
-                                        setState(() {
-                                          _subtasks.add(Subtask(
-                                            id: UniqueKey().toString(),
-                                            title: newTitle.trim(),
-                                          ));
-                                        });
-                                      }
-                                      Navigator.pop(context);
-                                    },
-                                    child: const Text('Add'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                          child: Text(
-                            '+ Add',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (_subtasks.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainer,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: theme.colorScheme.outline,
-                            style: BorderStyle.none,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.list, size: 16, color: theme.colorScheme.onSurfaceVariant),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Break this task into subtasks',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Column(
-                        children: _subtasks.asMap().entries.map((entry) {
-                          int idx = entry.key;
-                          Subtask st = entry.value;
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainer,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: theme.colorScheme.outline),
-                            ),
-                            child: Row(
-                              children: [
-                                Checkbox(
-                                  value: st.isCompleted,
-                                  activeColor: AppColors.primary,
-                                  onChanged: (v) {
-                                    setState(() {
-                                      _subtasks[idx] = st.copyWith(isCompleted: v ?? false);
-                                    });
-                                  },
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    st.title,
-                                    style: TextStyle(
-                                      decoration: st.isCompleted ? TextDecoration.lineThrough : null,
-                                      color: st.isCompleted ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.onSurface,
-                                    ),
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: Icon(Icons.close, size: 18, color: theme.colorScheme.error),
-                                  onPressed: () {
-                                    setState(() {
-                                      _subtasks.removeAt(idx);
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-
-                    const SizedBox(height: 32),
-
-                    // Submit Button
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        gradient: _titleController.text.trim().isNotEmpty ? AppColors.btnGradient : null,
-                        color: _titleController.text.trim().isNotEmpty ? null : theme.colorScheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: _titleController.text.trim().isNotEmpty
-                            ? [
-                                BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.35),
-                                  blurRadius: 16,
-                                  offset: const Offset(0, 4),
-                                )
-                              ]
-                            : null,
-                      ),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: _titleController.text.trim().isNotEmpty && !_isSaving && !_submitted ? _save : null,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            alignment: Alignment.center,
-                            child: _isSaving 
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                  )
-                                : Text(
-                                    _isEditing ? 'Save Changes' : 'Add Task',
-                              style: TextStyle(
-                                color: _titleController.text.trim().isNotEmpty ? Colors.white : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+            BottomActionBar(
+              child: GradientButton(
+                label: _editing ? 'Save changes' : 'Add task',
+                loading: _isSaving,
+                onPressed: _save,
               ),
             ),
           ],
@@ -695,131 +404,142 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
       ),
     );
   }
+}
 
-  Widget _buildFormField({
-    required String label,
-    required String hint,
-    TextEditingController? controller,
-    IconData? icon,
-    bool readOnly = false,
-    VoidCallback? onTap,
-    int maxLines = 1,
-    TextInputType? keyboardType,
-    Function(String)? onChanged,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (label.isNotEmpty) ...[
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.5,
-              color: theme.colorScheme.onSurfaceVariant,
+/// Text field with an attached "add" button, used for subtasks.
+class LabeledFieldInline extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final VoidCallback onAdd;
+
+  const LabeledFieldInline({super.key, required this.controller, required this.hint, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.cs.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: context.cs.outline, width: 1.2),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => onAdd(),
+              style: context.body.copyWith(fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: context.bodyMuted,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              ),
             ),
           ),
-          const SizedBox(height: 8),
+          IconButton(
+            tooltip: 'Add subtask',
+            icon: Icon(Icons.add_circle, color: context.primary),
+            onPressed: onAdd,
+          ),
         ],
-        Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: theme.colorScheme.outline),
-          ),
-          child: Row(
-            children: [
-              if (icon != null) ...[
-                const SizedBox(width: 16),
-                Icon(icon, size: 18, color: AppColors.primary.withValues(alpha: 0.7)),
-              ],
-              Expanded(
-                child: TextFormField(
-                  controller: controller,
-                  readOnly: readOnly,
-                  onTap: onTap,
-                  maxLines: maxLines,
-                  keyboardType: keyboardType,
-                  onChanged: onChanged,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: hint,
-                    hintStyle: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                      fontWeight: FontWeight.w500,
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: maxLines > 1 ? 16 : 14,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
+}
 
-  Widget _buildDropdownField<T>({
-    required String label,
-    required IconData icon,
-    required T value,
-    required List<DropdownMenuItem<T>> items,
-    required Function(T?) onChanged,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.5,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+class _PriorityOption extends StatelessWidget {
+  final int priority;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PriorityOption({required this.priority, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = priorityColor(priority);
+    final background = Color.alphaBlend(color.withValues(alpha: 0.14), context.cs.surfaceContainer);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '${Task.priorityLabel(priority)} priority',
+      child: Material(
+        color: selected ? color.withValues(alpha: 0.14) : context.cs.surfaceContainer,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          side: BorderSide(color: selected ? color : context.cs.outline, width: 1.5),
         ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: theme.colorScheme.outline),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, size: 18, color: AppColors.primary.withValues(alpha: 0.7)),
-              const SizedBox(width: 16),
-              Expanded(
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<T>(
-                    value: value,
-                    isExpanded: true,
-                    icon: Icon(Icons.keyboard_arrow_down, color: theme.colorScheme.onSurfaceVariant),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                    items: items,
-                    onChanged: onChanged,
-                  ),
+        child: InkWell(
+          customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+          onTap: onTap,
+          child: SizedBox(
+            height: 48,
+            child: Center(
+              child: Text(
+                Task.priorityLabel(priority),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: selected ? readableOn(color, background) : context.cs.onSurfaceVariant,
                 ),
               ),
-            ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Asks for a custom estimate in minutes. Owns its controller (see the note on
+/// the login screen's reset dialog).
+class _CustomDurationDialog extends StatefulWidget {
+  final int initialMinutes;
+  const _CustomDurationDialog({required this.initialMinutes});
+
+  @override
+  State<_CustomDurationDialog> createState() => _CustomDurationDialogState();
+}
+
+class _CustomDurationDialogState extends State<_CustomDurationDialog> {
+  late final _controller = TextEditingController(text: '${widget.initialMinutes}');
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final value = int.tryParse(_controller.text.trim());
+    if (value == null || value < _minMinutes || value > _maxMinutes) {
+      setState(() => _error = 'Enter $_minMinutes to $_maxMinutes minutes.');
+      return;
+    }
+    Navigator.pop(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Estimated time'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(3)],
+        decoration: InputDecoration(labelText: 'Minutes', errorText: _error),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _submit, child: const Text('Set')),
       ],
     );
   }

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/recurrence.dart';
+import '../theme/app_styles.dart';
+import 'ui.dart';
 
 enum _EndMode { never, onDate, afterCount }
 
@@ -20,21 +23,20 @@ class RecurrenceRulePicker extends StatelessWidget {
   });
 
   static const _frequencyLabels = {
-    RecurrenceFrequency.none: 'Does not repeat',
     RecurrenceFrequency.daily: 'Daily',
     RecurrenceFrequency.weekly: 'Weekly',
     RecurrenceFrequency.monthly: 'Monthly',
   };
 
-  static const _weekdayLabels = {
-    1: 'M',
-    2: 'T',
-    3: 'W',
-    4: 'T',
-    5: 'F',
-    6: 'S',
-    7: 'S',
-  };
+  static const _weekdays = [
+    (1, 'M', 'Monday'),
+    (2, 'T', 'Tuesday'),
+    (3, 'W', 'Wednesday'),
+    (4, 'T', 'Thursday'),
+    (5, 'F', 'Friday'),
+    (6, 'S', 'Saturday'),
+    (7, 'S', 'Sunday'),
+  ];
 
   _EndMode get _endMode {
     if (value.count != null) return _EndMode.afterCount;
@@ -49,193 +51,221 @@ class RecurrenceRulePicker extends StatelessWidget {
       firstDate: firstDate,
       lastDate: firstDate.add(const Duration(days: 3650)),
     );
-    if (picked != null) {
-      onChanged(value.copyWith(endDate: picked, clearCount: true));
-    }
+    if (picked != null) onChanged(value.copyWith(endDate: picked, clearCount: true));
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final unit = switch (value.frequency) {
+      RecurrenceFrequency.daily => value.interval == 1 ? 'day' : 'days',
+      RecurrenceFrequency.weekly => value.interval == 1 ? 'week' : 'weeks',
+      RecurrenceFrequency.monthly => value.interval == 1 ? 'month' : 'months',
+      RecurrenceFrequency.none => '',
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Repeat', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<RecurrenceFrequency>(
-          initialValue: value.frequency,
-          onChanged: (freq) {
-            if (freq == null) return;
-            onChanged(
-              RecurrenceRule(
-                frequency: freq,
-                interval: 1,
-                daysOfWeek: freq == RecurrenceFrequency.weekly
-                    ? {firstDate.weekday}
-                    : const {},
+        const SectionLabel('Repeat'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final entry in _frequencyLabels.entries)
+              PillChip(
+                label: entry.value,
+                selected: value.frequency == entry.key,
+                onTap: () => onChanged(
+                  RecurrenceRule(
+                    frequency: entry.key,
+                    interval: 1,
+                    daysOfWeek: entry.key == RecurrenceFrequency.weekly ? {firstDate.weekday} : const {},
+                  ),
+                ),
               ),
-            );
-          },
-          items: _frequencyLabels.entries
-              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-              .toList(),
-          decoration: InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          ),
+          ],
         ),
         if (value.isRecurring) ...[
           const SizedBox(height: 16),
           Row(
             children: [
-              const Text('Every'),
-              const SizedBox(width: 12),
-              IconButton.filledTonal(
-                onPressed: value.interval > 1
-                    ? () => onChanged(value.copyWith(interval: value.interval - 1))
-                    : null,
-                icon: const Icon(Icons.remove),
-                iconSize: 18,
-                visualDensity: VisualDensity.compact,
-              ),
-              SizedBox(
-                width: 32,
-                child: Text(
-                  '${value.interval}',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleMedium,
-                ),
-              ),
-              IconButton.filledTonal(
-                onPressed: value.interval < 30
-                    ? () => onChanged(value.copyWith(interval: value.interval + 1))
-                    : null,
-                icon: const Icon(Icons.add),
-                iconSize: 18,
-                visualDensity: VisualDensity.compact,
+              Text('Every', style: context.body),
+              const SizedBox(width: 8),
+              _Stepper(
+                value: value.interval,
+                min: 1,
+                max: 30,
+                label: 'interval',
+                onChanged: (v) => onChanged(value.copyWith(interval: v)),
               ),
               const SizedBox(width: 8),
-              Text(switch (value.frequency) {
-                RecurrenceFrequency.daily =>
-                  value.interval == 1 ? 'day' : 'days',
-                RecurrenceFrequency.weekly =>
-                  value.interval == 1 ? 'week' : 'weeks',
-                RecurrenceFrequency.monthly =>
-                  value.interval == 1 ? 'month' : 'months',
-                RecurrenceFrequency.none => '',
-              }),
+              Text(unit, style: context.body),
             ],
           ),
           if (value.frequency == RecurrenceFrequency.weekly) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 6,
-              children: _weekdayLabels.entries.map((e) {
-                final selected = value.daysOfWeek.contains(e.key);
-                return FilterChip(
-                  label: Text(e.value),
-                  selected: selected,
-                  onSelected: (isSelected) {
-                    final days = Set<int>.from(value.daysOfWeek);
-                    if (isSelected) {
-                      days.add(e.key);
-                    } else if (days.length > 1) {
-                      days.remove(e.key);
-                    }
-                    onChanged(value.copyWith(daysOfWeek: days));
-                  },
-                );
-              }).toList(),
-            ),
-          ],
-          const SizedBox(height: 16),
-          Text('Ends', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          SegmentedButton<_EndMode>(
-            selected: {_endMode},
-            onSelectionChanged: (selection) {
-              switch (selection.first) {
-                case _EndMode.never:
-                  onChanged(value.copyWith(clearEndDate: true, clearCount: true));
-                case _EndMode.onDate:
-                  onChanged(
-                    value.copyWith(
-                      endDate: firstDate.add(const Duration(days: 30)),
-                      clearCount: true,
-                    ),
-                  );
-                case _EndMode.afterCount:
-                  onChanged(value.copyWith(count: 10, clearEndDate: true));
-              }
-            },
-            segments: const [
-              ButtonSegment(value: _EndMode.never, label: Text('Never')),
-              ButtonSegment(value: _EndMode.onDate, label: Text('On date')),
-              ButtonSegment(value: _EndMode.afterCount, label: Text('After N')),
-            ],
-          ),
-          if (_endMode == _EndMode.onDate) ...[
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: () => _pickEndDate(context),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: theme.colorScheme.outline),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.event, size: 18),
-                    const SizedBox(width: 8),
-                    Text(value.endDate!.toString().split(' ')[0]),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (_endMode == _EndMode.afterCount) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
+            const SectionLabel('On'),
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                IconButton.filledTonal(
-                  onPressed: (value.count ?? 10) > 1
-                      ? () => onChanged(value.copyWith(count: (value.count ?? 10) - 1))
-                      : null,
-                  icon: const Icon(Icons.remove),
-                  iconSize: 18,
-                  visualDensity: VisualDensity.compact,
-                ),
-                SizedBox(
-                  width: 40,
-                  child: Text(
-                    '${value.count ?? 10}',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.titleMedium,
+                for (final (index, letter, name) in _weekdays)
+                  _DayToggle(
+                    letter: letter,
+                    name: name,
+                    selected: value.daysOfWeek.contains(index),
+                    onTap: () {
+                      final days = Set<int>.from(value.daysOfWeek);
+                      if (days.contains(index)) {
+                        if (days.length > 1) days.remove(index);
+                      } else {
+                        days.add(index);
+                      }
+                      onChanged(value.copyWith(daysOfWeek: days));
+                    },
                   ),
-                ),
-                IconButton.filledTonal(
-                  onPressed: (value.count ?? 10) < 200
-                      ? () => onChanged(value.copyWith(count: (value.count ?? 10) + 1))
-                      : null,
-                  icon: const Icon(Icons.add),
-                  iconSize: 18,
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 8),
-                const Text('occurrences'),
               ],
             ),
           ],
-          const SizedBox(height: 8),
-          Text(
-            value.summary,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontStyle: FontStyle.italic,
+          const SizedBox(height: 16),
+          const SectionLabel('Ends'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              PillChip(
+                label: 'Never',
+                selected: _endMode == _EndMode.never,
+                onTap: () => onChanged(value.copyWith(clearEndDate: true, clearCount: true)),
+              ),
+              PillChip(
+                label: 'On date',
+                selected: _endMode == _EndMode.onDate,
+                onTap: () => onChanged(
+                  value.copyWith(endDate: firstDate.add(const Duration(days: 30)), clearCount: true),
+                ),
+              ),
+              PillChip(
+                label: 'After',
+                selected: _endMode == _EndMode.afterCount,
+                onTap: () => onChanged(value.copyWith(count: 10, clearEndDate: true)),
+              ),
+            ],
+          ),
+          if (_endMode == _EndMode.onDate) ...[
+            const SizedBox(height: 12),
+            PickerField(
+              label: 'Last occurrence',
+              value: DateFormat('EEE, MMM d, yyyy').format(value.endDate!),
+              icon: Icons.event,
+              onTap: () => _pickEndDate(context),
             ),
+          ],
+          if (_endMode == _EndMode.afterCount) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _Stepper(
+                  value: value.count ?? 10,
+                  min: 1,
+                  max: 200,
+                  label: 'occurrences',
+                  onChanged: (v) => onChanged(value.copyWith(count: v)),
+                ),
+                const SizedBox(width: 8),
+                Text('occurrences', style: context.body),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.repeat, size: 16, color: context.cs.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Expanded(child: Text(value.summary, style: context.label)),
+            ],
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Round weekday button (44 px) with the full day name for screen readers.
+class _DayToggle extends StatelessWidget {
+  final String letter;
+  final String name;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _DayToggle({required this.letter, required this.name, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: name,
+      child: Material(
+        color: selected ? context.primary : context.cs.surfaceContainer,
+        shape: CircleBorder(side: BorderSide(color: selected ? context.primary : context.cs.outline, width: 1.5)),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 44,
+            child: Center(
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color: selected ? Colors.white : context.cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// − value + control with 48 px buttons.
+class _Stepper extends StatelessWidget {
+  final int value;
+  final int min;
+  final int max;
+  final String label;
+  final ValueChanged<int> onChanged;
+
+  const _Stepper({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.label,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton.filledTonal(
+          tooltip: 'Decrease $label',
+          onPressed: value > min ? () => onChanged(value - 1) : null,
+          icon: const Icon(Icons.remove),
+        ),
+        SizedBox(
+          width: 44,
+          child: Text('$value', textAlign: TextAlign.center, style: context.h3),
+        ),
+        IconButton.filledTonal(
+          tooltip: 'Increase $label',
+          onPressed: value < max ? () => onChanged(value + 1) : null,
+          icon: const Icon(Icons.add),
+        ),
       ],
     );
   }
