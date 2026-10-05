@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/schedule.dart';
@@ -16,13 +17,10 @@ class AIConfigException implements Exception {
 }
 
 class AIService {
-  // The key is never hardcoded in source. Provide it at build/run time with:
-  //   flutter run --dart-define=GEMINI_API_KEY=your_key_here
-  // See README.md for details. This keeps the key out of source control,
-  // though for full protection in production a server-side proxy (e.g. a
-  // Cloud Function) that holds the key is recommended instead of shipping
-  // it inside the compiled app.
-  static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
+  static String get _apiKey =>
+      dotenv.env['GEMINI_API_KEY'] ??
+      const String.fromEnvironment('GEMINI_API_KEY');
+
   static const String _apiUrl =
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
