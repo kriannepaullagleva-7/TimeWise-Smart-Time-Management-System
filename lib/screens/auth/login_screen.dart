@@ -204,8 +204,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: const Text('Continue as Guest'),
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(_isSignIn ? "Don't have an account?" : 'Already have an account?', style: context.bodyMuted),
                     TextButton(

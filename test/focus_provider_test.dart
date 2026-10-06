@@ -146,6 +146,25 @@ void main() {
     expect(focus.hasSession, isFalse);
   });
 
+  test('closing a restored session never lowers the focus time already logged on the task', () async {
+    SharedPreferences.setMockInitialValues({
+      'focus_task_id': 't1',
+      'focus_state': 'paused',
+      'focus_total_seconds': 1500,
+      'focus_base_elapsed': 0, // stale counter
+    });
+    repo = FakeTaskRepo([makeTask('t1', minutes: 25).copyWith(elapsedSeconds: 180)]);
+    notifs = FakeNotifs();
+    tasks = TaskProvider(taskRepository: repo, notificationService: notifs)..attachUser('u1');
+    clock = _Clock();
+    focus = FocusProvider(notifications: notifs, clock: clock.call)..updateTaskProvider(tasks);
+    await _flush();
+
+    expect(focus.elapsedSeconds, 180);
+    await focus.stopFocus();
+    expect(repo.store.single.elapsedSeconds, 180);
+  });
+
   test('stopping when no session exists is harmless', () async {
     await setUpAll_();
     await focus.stopFocus();

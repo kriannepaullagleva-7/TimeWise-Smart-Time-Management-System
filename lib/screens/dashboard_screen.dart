@@ -491,6 +491,7 @@ class _TodayScheduleState extends State<_TodaySchedule> {
                       _Legend(AppColors.primary, 'Fixed'),
                       _Legend(AppColors.secondary, 'AI plan'),
                       _Legend(AppColors.warning, 'Break'),
+                      if (usage.otherMinutes > 0) const _Legend(Color(0xFF8B5CF6), 'Other'),
                       _Legend(AppColors.success.withValues(alpha: 0.55), 'Free'),
                     ],
                   ),

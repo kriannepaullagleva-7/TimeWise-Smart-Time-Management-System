@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
+import 'app_styles.dart' show readableOn;
 
 /// Central Material 3 theme for TimeWise. Component themes live here so
 /// screens style themselves through `Theme.of(context)` instead of
@@ -16,6 +17,9 @@ class AppTheme {
   }
 
   static ThemeData _build(ColorScheme colorScheme) {
+    // Accent-coloured TEXT (text and outlined buttons) is lightened or darkened
+    // until it reads at 4.5:1 on the page, so every accent works in both modes.
+    final accentText = readableOn(colorScheme.primary, colorScheme.surface);
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
@@ -84,6 +88,7 @@ class AppTheme {
 
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
+          foregroundColor: accentText,
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           side: BorderSide(color: colorScheme.outlineVariant),
@@ -93,6 +98,7 @@ class AppTheme {
 
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
+          foregroundColor: accentText,
           minimumSize: const Size(48, 44),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
@@ -157,6 +163,16 @@ class AppTheme {
         backgroundColor: colorScheme.primary,
         foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+
+      timePickerTheme: TimePickerThemeData(
+        // The default AM/PM chip used the light secondary colour under white text.
+        dayPeriodColor: WidgetStateColor.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? colorScheme.primary : Colors.transparent,
+        ),
+        dayPeriodTextColor: WidgetStateColor.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? Colors.white : colorScheme.onSurfaceVariant,
+        ),
       ),
 
       dialogTheme: DialogThemeData(

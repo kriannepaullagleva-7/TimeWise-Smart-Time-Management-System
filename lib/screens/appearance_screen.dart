@@ -22,7 +22,16 @@ class AppearanceScreen extends StatelessWidget {
     final theme = context.watch<ThemeProvider>();
 
     return Scaffold(
+      bottomNavigationBar: BottomActionBar(
+              child: OutlinedButton.icon(
+                onPressed: theme.reset,
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Reset to default'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+              ),
+            ),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             const ScreenHeader(title: 'Appearance'),
@@ -82,18 +91,6 @@ class AppearanceScreen extends StatelessWidget {
                         GradientButton(label: 'Primary button', onPressed: () {}),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ),
-            BottomActionBar(
-              child: Column(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: theme.reset,
-                    icon: const Icon(Icons.restart_alt),
-                    label: const Text('Reset to default'),
-                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
                   ),
                 ],
               ),

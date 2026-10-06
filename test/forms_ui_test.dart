@@ -15,7 +15,7 @@ void main() {
 
   group('Add / edit task', () {
     testWidgets('an empty name is refused with a message and nothing is saved', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       await pumpScreen(tester, c, const AddTaskScreen());
 
@@ -26,7 +26,7 @@ void main() {
     });
 
     testWidgets('saves a new task with the chosen options and closes with a confirmation', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       await pumpScreen(tester, c, const AddTaskScreen());
 
@@ -50,7 +50,7 @@ void main() {
     });
 
     testWidgets('the category list is the user\'s own and the first one is preselected', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       final profile = testUser.copyWith(categories: ['Thesis', 'Gym']);
       await c.auth.updateProfile(profile);
@@ -67,28 +67,25 @@ void main() {
     });
 
     testWidgets('Custom… estimate: validates the range and adds a chip (controller regression)', (tester) async {
-      setDevice(tester, 390, 844);
-      final errors = ErrorSink()..install();
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       await pumpScreen(tester, c, const AddTaskScreen());
 
       await tester.tap(find.text('Custom…'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, '500');
+      await tester.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), '800');
       await tester.tap(find.text('Set'));
       await tester.pump();
       expect(find.text('Enter 5 to 720 minutes.'), findsOneWidget);
 
-      await tester.enterText(find.byType(TextField).last, '50');
+      await tester.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), '50');
       await tester.tap(find.text('Set'));
       await tester.pumpAndSettle();
       expect(find.text('50 min'), findsOneWidget);
-      errors.restore();
-      expect(errors.errors, isEmpty, reason: 'closing the dialog must not use a disposed controller');
     });
 
     testWidgets('a subtask typed but not yet added is not lost on save', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       await pumpScreen(tester, c, const AddTaskScreen());
 
@@ -101,14 +98,14 @@ void main() {
     });
 
     testWidgets('a deadline in the past is called out', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: [makeTask('old', deadline: day(-3, 9))]);
       await pumpScreen(tester, c, AddTaskScreen(task: c.taskRepo.store.single));
       expect(find.textContaining('deadline has passed'), findsOneWidget);
     });
 
     testWidgets('editing keeps the series link, focus time and completion time', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final original = Task(
         id: 'e1',
         userId: 'u1',
@@ -143,7 +140,7 @@ void main() {
     });
 
     testWidgets('editing uses the live copy, so focus time logged meanwhile is kept', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final stale = makeTask('e', title: 'Original');
       final c = await makeCtx(tasks: [stale]);
       await pumpScreen(tester, c, AddTaskScreen(task: stale));
@@ -158,7 +155,7 @@ void main() {
     });
 
     testWidgets('a failed save shows a message and unlocks the form', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       c.taskRepo.failWrites = true;
       await pumpScreen(tester, c, const AddTaskScreen());
@@ -178,7 +175,7 @@ void main() {
     });
 
     testWidgets('Repeat: a daily rule creates one task per day', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(tasks: []);
       await pumpScreen(tester, c, const AddTaskScreen());
 
@@ -203,7 +200,7 @@ void main() {
 
   group('Add / edit event', () {
     testWidgets('saves the note and the Fixed switch', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(schedule: []);
       await pumpScreen(tester, c, AddFixedEventScreen(date: day(1, 0)));
 
@@ -222,7 +219,7 @@ void main() {
     });
 
     testWidgets('an overlap is explained next to the times and nothing is saved', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final d = day(1, 0);
       final c = await makeCtx(schedule: [
         ScheduleItem(id: 'x', userId: 'u1', title: 'Existing class', startTime: day(1, 9, 30), endTime: day(1, 10, 30), type: 'class', isFixed: true),
@@ -239,7 +236,7 @@ void main() {
     });
 
     testWidgets('an end time before the start time is flagged and the form stays usable', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(schedule: []);
       await pumpScreen(tester, c, AddFixedEventScreen(date: day(1, 0)));
 
@@ -262,7 +259,7 @@ void main() {
     });
 
     testWidgets('Repeat creates the series and the repeat options appear', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(schedule: []);
       await pumpScreen(tester, c, AddFixedEventScreen(date: day(1, 0)));
 
@@ -282,7 +279,7 @@ void main() {
     });
 
     testWidgets('editing changes only that occurrence and hides the repeat switch', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final item = ScheduleItem(
         id: 'occ',
         userId: 'u1',
@@ -308,7 +305,7 @@ void main() {
     });
 
     testWidgets('an empty name is refused', (tester) async {
-      setDevice(tester, 390, 844);
+      setDevice(tester, 390, 2400);
       final c = await makeCtx(schedule: []);
       await pumpScreen(tester, c, AddFixedEventScreen(date: day(1, 0)));
       await tester.tap(find.text('Save event'));

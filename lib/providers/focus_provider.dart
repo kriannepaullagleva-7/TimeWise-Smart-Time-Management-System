@@ -119,6 +119,12 @@ class FocusProvider with ChangeNotifier {
     }
     _currentTask = task;
     _restoredTaskId = null;
+    // The task document is the source of truth for logged focus time: a saved
+    // session with an older (or missing) counter must never lower it.
+    if (task.elapsedSeconds > _baseElapsed) {
+      _baseElapsed = task.elapsedSeconds;
+      _lastSyncedSeconds = _baseElapsed;
+    }
     scheduleMicrotask(notifyListeners);
   }
 
@@ -274,7 +280,8 @@ class FocusProvider with ChangeNotifier {
   Future<void> _syncElapsed() async {
     final task = _currentTask;
     if (task == null || _taskProvider == null) return;
-    final seconds = elapsedSeconds;
+    // Never write less than the task already has (see _tryRestoreTask).
+    final seconds = max(elapsedSeconds, task.elapsedSeconds);
     _lastSyncedSeconds = seconds;
     _currentTask = task.copyWith(elapsedSeconds: seconds);
     await _taskProvider!.setElapsed(task.id, seconds);

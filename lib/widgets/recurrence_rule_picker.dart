@@ -247,12 +247,22 @@ class _Stepper extends StatelessWidget {
     required this.onChanged,
   });
 
+  /// Tonal buttons default to the (light) secondary colour, which is unreadable
+  /// with the white icon; use the accent instead.
+  ButtonStyle _stepperStyle(BuildContext context) => IconButton.styleFrom(
+        backgroundColor: context.primary.withValues(alpha: 0.14),
+        foregroundColor: readableOn(context.primary, context.cs.surfaceContainer),
+        disabledBackgroundColor: context.cs.outline,
+        disabledForegroundColor: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+      );
+
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton.filledTonal(
+          style: _stepperStyle(context),
           tooltip: 'Decrease $label',
           onPressed: value > min ? () => onChanged(value - 1) : null,
           icon: const Icon(Icons.remove),
@@ -262,6 +272,7 @@ class _Stepper extends StatelessWidget {
           child: Text('$value', textAlign: TextAlign.center, style: context.h3),
         ),
         IconButton.filledTonal(
+          style: _stepperStyle(context),
           tooltip: 'Increase $label',
           onPressed: value < max ? () => onChanged(value + 1) : null,
           icon: const Icon(Icons.add),

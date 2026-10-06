@@ -64,8 +64,10 @@ class _TasksScreenState extends State<TasksScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<TaskProvider>();
     final all = provider.tasks;
-    final pendingCount = all.where((t) => !t.isCompleted).length;
-    final doneCount = all.length - pendingCount;
+    // Counts match the list: a repeating series counts once (its next occurrence).
+    final listed = TaskProvider.collapseSeries(all);
+    final pendingCount = listed.where((t) => !t.isCompleted).length;
+    final doneCount = listed.length - pendingCount;
 
     Widget body;
     if (provider.streamError != null) {

@@ -86,9 +86,11 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const _ActiveFocusStrip(),
-                SizedBox(
-                  height: 68,
-                  child: Row(
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 68),
+                  child: IntrinsicHeight(
+                    child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _NavItem(
                         selected: _selectedIndex == 0,
@@ -149,6 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () => _navigateToTab(3),
                       ),
                     ],
+                  ),
                   ),
                 ),
               ],

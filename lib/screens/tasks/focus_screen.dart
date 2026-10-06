@@ -137,26 +137,33 @@ class FocusScreen extends StatelessWidget {
                                       ),
                                     ),
                                   ),
-                                  Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        _clock(focus.remainingSeconds),
-                                        style: TextStyle(
-                                          fontSize: ring > 220 ? 48 : 40,
-                                          fontWeight: FontWeight.w800,
-                                          color: context.cs.onSurface,
-                                          fontFeatures: const [FontFeature.tabularFigures()],
-                                        ),
+                                  // Scales down instead of overflowing with very large system text.
+                                  Padding(
+                                    padding: const EdgeInsets.all(28),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            _clock(focus.remainingSeconds),
+                                            style: TextStyle(
+                                              fontSize: ring > 220 ? 48 : 40,
+                                              fontWeight: FontWeight.w800,
+                                              color: context.cs.onSurface,
+                                              fontFeatures: const [FontFeature.tabularFigures()],
+                                            ),
+                                          ),
+                                          Text(
+                                            finished ? 'TIME IS UP' : (running ? 'FOCUSING' : 'PAUSED'),
+                                            style: context.caption.copyWith(
+                                              letterSpacing: 2,
+                                              color: finished ? readableOn(context.primary, context.cs.surface) : null,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      Text(
-                                        finished ? 'TIME IS UP' : (running ? 'FOCUSING' : 'PAUSED'),
-                                        style: context.caption.copyWith(
-                                          letterSpacing: 2,
-                                          color: finished ? readableOn(context.primary, context.cs.surface) : null,
-                                        ),
-                                      ),
-                                    ],
+                                    ),
                                   ),
                                 ],
                               ),

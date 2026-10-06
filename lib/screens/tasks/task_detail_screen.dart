@@ -58,7 +58,60 @@ class _TaskDetailView extends StatelessWidget {
     final focusProgress = estimatedSeconds == 0 ? 0.0 : (task.elapsedSeconds / estimatedSeconds).clamp(0.0, 1.0);
 
     return Scaffold(
+      bottomNavigationBar: BottomActionBar(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (task.isCompleted)
+                    OutlinedButton.icon(
+                      onPressed: () => toggleTaskCompletion(context, task),
+                      icon: const Icon(Icons.undo),
+                      label: const Text('Mark incomplete'),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                    )
+                  else
+                    GradientButton(
+                      label: 'Mark complete',
+                      icon: Icons.check,
+                      onPressed: () => toggleTaskCompletion(context, task),
+                    ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (!task.isCompleted) ...[
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => startFocusOn(context, task),
+                            icon: const Icon(Icons.timer_outlined),
+                            label: const Text('Focus'),
+                            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final deleted = await confirmAndDeleteTask(context, task);
+                            if (deleted && context.mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+                          },
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Delete'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            foregroundColor: readableOn(context.cs.error, context.cs.surface),
+                            side: BorderSide(color: context.cs.error.withValues(alpha: 0.5)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             ScreenHeader(
@@ -175,58 +228,6 @@ class _TaskDetailView extends StatelessWidget {
                       ),
                     ),
                   ],
-                ],
-              ),
-            ),
-            BottomActionBar(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (task.isCompleted)
-                    OutlinedButton.icon(
-                      onPressed: () => toggleTaskCompletion(context, task),
-                      icon: const Icon(Icons.undo),
-                      label: const Text('Mark incomplete'),
-                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                    )
-                  else
-                    GradientButton(
-                      label: 'Mark complete',
-                      icon: Icons.check,
-                      onPressed: () => toggleTaskCompletion(context, task),
-                    ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      if (!task.isCompleted) ...[
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => startFocusOn(context, task),
-                            icon: const Icon(Icons.timer_outlined),
-                            label: const Text('Focus'),
-                            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final deleted = await confirmAndDeleteTask(context, task);
-                            if (deleted && context.mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
-                          },
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Delete'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(48),
-                            foregroundColor: readableOn(context.cs.error, context.cs.surface),
-                            side: BorderSide(color: context.cs.error.withValues(alpha: 0.5)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),

@@ -133,8 +133,9 @@ class GradientButton extends StatelessWidget {
       // clipped to a visible light band under the button.
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: enabled ? (gradient ?? context.primaryGradient) : null,
-          color: enabled ? null : context.cs.surfaceContainerHighest,
+          // While loading the button keeps its colour so the white spinner stays visible.
+          gradient: (enabled || loading) ? (gradient ?? context.primaryGradient) : null,
+          color: (enabled || loading) ? null : context.cs.surfaceContainerHighest,
           borderRadius: radius,
           boxShadow: enabled
               ? [
@@ -197,9 +198,12 @@ class BottomActionBar extends StatelessWidget {
         color: context.cs.surface,
         border: Border(top: BorderSide(color: context.cs.outline)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.page, 12, AppSpacing.page, 16),
-        child: child,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.page, 12, AppSpacing.page, 16),
+          child: child,
+        ),
       ),
     );
   }

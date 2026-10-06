@@ -206,7 +206,15 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     ];
 
     return Scaffold(
+      bottomNavigationBar: BottomActionBar(
+              child: GradientButton(
+                label: _editing ? 'Save changes' : 'Add task',
+                loading: _isSaving,
+                onPressed: _save,
+              ),
+            ),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             ScreenHeader(title: _editing ? 'Edit Task' : 'Add Task'),
@@ -390,13 +398,6 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                     onAdd: _addSubtask,
                   ),
                 ],
-              ),
-            ),
-            BottomActionBar(
-              child: GradientButton(
-                label: _editing ? 'Save changes' : 'Add task',
-                loading: _isSaving,
-                onPressed: _save,
               ),
             ),
           ],

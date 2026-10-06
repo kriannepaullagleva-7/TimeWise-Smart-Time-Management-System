@@ -143,7 +143,15 @@ class _AddFixedEventScreenState extends State<AddFixedEventScreen> {
     final timeError = !_endAfterStart ? 'End time must be after the start time.' : null;
 
     return Scaffold(
+      bottomNavigationBar: BottomActionBar(
+              child: GradientButton(
+                label: _editing ? 'Save changes' : 'Save event',
+                loading: _isSaving,
+                onPressed: _save,
+              ),
+            ),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             ScreenHeader(title: _editing ? 'Edit Event' : 'Add Event'),
@@ -278,13 +286,6 @@ class _AddFixedEventScreenState extends State<AddFixedEventScreen> {
                     ),
                   ],
                 ],
-              ),
-            ),
-            BottomActionBar(
-              child: GradientButton(
-                label: _editing ? 'Save changes' : 'Save event',
-                loading: _isSaving,
-                onPressed: _save,
               ),
             ),
           ],

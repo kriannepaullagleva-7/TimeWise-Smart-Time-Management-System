@@ -180,7 +180,7 @@ class _AIedSchedulePreviewScreenState extends State<AIedSchedulePreviewScreen> {
   }
 
   String _summary() {
-    final tasks = _items.where((i) => i.taskId != null).length;
+    final tasks = _items.where((i) => i.taskId != null).map((i) => i.taskId).toSet().length;
     final minutes = _items.fold<int>(0, (sum, i) => sum + i.duration.inMinutes);
     final hours = minutes ~/ 60;
     final rest = minutes % 60;

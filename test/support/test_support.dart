@@ -484,6 +484,7 @@ class ErrorSink {
   FlutterExceptionHandler? _old;
   void install() {
     _old = FlutterError.onError;
+    addTearDown(restore);
     FlutterError.onError = (d) => errors.add(d.exceptionAsString().split('\n').first);
   }
 
