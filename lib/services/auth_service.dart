@@ -66,50 +66,6 @@ class AuthService {
     );
   }
 
-  // ─── Anonymous / Guest ───────────────────────────────────────────────────────
-
-  Future<UserModel?> signInAnonymously() async {
-    final result = await _auth.signInAnonymously();
-    final user = result.user!;
-
-    final doc = await _firestore.collection('users').doc(user.uid).get();
-    if (!doc.exists) {
-      final userModel = UserModel(
-        uid: user.uid,
-        email: '',
-        name: 'Guest',
-        createdAt: DateTime.now(),
-      );
-      await _firestore.collection('users').doc(user.uid).set(userModel.toMap());
-      return userModel;
-    }
-    return UserModel.fromMap(doc.data() as Map<String, dynamic>);
-  }
-
-  /// Turns the current guest into a normal e-mail account. The uid does not
-  /// change, so everything the guest created stays in the account.
-  Future<UserModel> linkGuestToEmail({
-    required String email,
-    required String name,
-    required String password,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null || !user.isAnonymous) {
-      throw StateError('Only a guest account can be upgraded.');
-    }
-    final credential = EmailAuthProvider.credential(email: email.trim(), password: password);
-    final linked = await user.linkWithCredential(credential);
-    final linkedUser = linked.user!;
-    await linkedUser.updateDisplayName(name.trim());
-
-    final existing = await getUserProfile(linkedUser.uid);
-    final updated = (existing ??
-            UserModel(uid: linkedUser.uid, email: email.trim(), name: name.trim(), createdAt: DateTime.now()))
-        .copyWith(name: name.trim(), email: email.trim());
-    await _firestore.collection('users').doc(linkedUser.uid).set(updated.toMap());
-    return updated;
-  }
-
   // ─── Profile helpers ────────────────────────────────────────────────────────
 
   Future<UserModel?> getUserProfile(String uid) async {
@@ -157,8 +113,6 @@ class AuthService {
   // ─── Accessors ───────────────────────────────────────────────────────────────
 
   User? get currentUser => _auth.currentUser;
-
-  bool get isGuest => _auth.currentUser?.isAnonymous ?? false;
 
   /// "Guest", "Google" or "Email" for the signed-in account.
   String get signInMethod {

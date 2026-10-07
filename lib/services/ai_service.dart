@@ -22,10 +22,8 @@ class AIService {
   static const String _envModel = String.fromEnvironment('GEMINI_MODEL');
   static const String _baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-  /// Models tried in order. `gemini-2.0-flash` (shut down 1 June 2026) and
-  /// `gemini-2.5-flash` ("no longer available to new users") are not served
-  /// to new projects any more; the 3.5 family was verified live on 6 Oct 2026.
-  static const List<String> defaultModels = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'];
+  /// Models tried in order.
+  static const List<String> defaultModels = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash'];
 
   static const _module = 'AIService';
 

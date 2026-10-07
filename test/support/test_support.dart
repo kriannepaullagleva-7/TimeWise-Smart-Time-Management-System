@@ -70,16 +70,13 @@ ThemeData withRoboto(ThemeData t) {
 
 class FakeAuth implements AuthService {
   final UserModel user;
-  bool guest;
   final List<String> resetEmails = [];
-  FakeAuth(this.user, {this.guest = false});
+  FakeAuth(this.user);
 
   @override
   User? get currentUser => null;
   @override
-  bool get isGuest => guest;
-  @override
-  String get signInMethod => guest ? 'Guest' : 'Email';
+  String get signInMethod => 'Email';
   @override
   Stream<User?> get authStateChanges => const Stream.empty();
   @override
@@ -88,13 +85,6 @@ class FakeAuth implements AuthService {
   Future<UserModel?> signUpWithEmail(String e, String n, String p) async => user;
   @override
   Future<UserModel?> signInWithGoogle() async => user;
-  @override
-  Future<UserModel?> signInAnonymously() async => user;
-  @override
-  Future<UserModel> linkGuestToEmail({required String email, required String name, required String password}) async {
-    guest = false;
-    return user.copyWith(email: email, name: name);
-  }
 
   @override
   Future<void> sendPasswordResetEmail(String email) async => resetEmails.add(email);
@@ -406,7 +396,6 @@ Future<Ctx> makeCtx({
   List<Task>? tasks,
   List<ScheduleItem>? schedule,
   Duration latency = Duration.zero,
-  bool guest = false,
   bool failStream = false,
   AIService? ai,
 }) async {
@@ -414,7 +403,7 @@ Future<Ctx> makeCtx({
   final taskRepo = FakeTaskRepo(tasks ?? seedTasks(), latency)..failStream = failStream;
   final schRepo = FakeScheduleRepo(schedule ?? seedSchedule());
   final notifs = FakeNotifs();
-  final authService = FakeAuth(testUser, guest: guest);
+  final authService = FakeAuth(testUser);
   final auth = AuthProvider(authService: authService, takeOnboarding: () async => null);
   await auth.signIn('x@y.z', 'pw123456');
   final tp = TaskProvider(taskRepository: taskRepo, notificationService: notifs)..attachUser('u1');

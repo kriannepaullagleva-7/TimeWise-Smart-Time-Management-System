@@ -85,42 +85,18 @@ void main() {
       expect(c.auth.currentUser!.categories, isNot(contains('Other')));
     });
 
-    testWidgets('Log out asks first; a guest is warned that data will be lost', (tester) async {
+    testWidgets('Log out asks first', (tester) async {
       setDevice(tester, 390, 2200);
-      final c = await makeCtx(guest: true);
+      final c = await makeCtx();
       await pumpScreen(tester, c, const ProfileScreen());
 
-      expect(find.text('Guest account'), findsOneWidget);
-      expect(find.text('Create account'), findsOneWidget);
       await tester.ensureVisible(find.text('Log out'));
       await tester.tap(find.text('Log out'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('cannot be recovered'), findsOneWidget);
+      expect(find.text('Log out?'), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(c.auth.isAuthenticated, isTrue);
-    });
-
-    testWidgets('Create account upgrades a guest and keeps the data', (tester) async {
-      setDevice(tester, 390, 2200);
-      final c = await makeCtx(guest: true);
-      await pumpScreen(tester, c, const ProfileScreen());
-
-      await tester.tap(find.text('Create account'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Create account').last);
-      await tester.pump();
-      expect(find.text('Enter your name.'), findsOneWidget);
-
-      final fields = find.descendant(of: find.byType(Material), matching: find.byType(TextField));
-      await tester.enterText(fields.at(fields.evaluate().length - 3), 'New Name');
-      await tester.enterText(fields.at(fields.evaluate().length - 2), 'new@x.co');
-      await tester.enterText(fields.at(fields.evaluate().length - 1), 'secret1');
-      await tester.tap(find.text('Create account').last);
-      await settle(tester, 600);
-
-      expect(c.auth.isGuest, isFalse);
-      expect(c.auth.currentUser!.email, 'new@x.co');
     });
   });
 

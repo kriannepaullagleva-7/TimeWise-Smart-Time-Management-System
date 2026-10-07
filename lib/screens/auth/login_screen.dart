@@ -197,12 +197,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   label: const Text('Continue with Google'),
                   style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52), foregroundColor: context.cs.onSurface),
                 ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: busy ? null : () => _run((auth) => auth.signInAsGuest()),
-                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52), foregroundColor: context.cs.onSurfaceVariant),
-                  child: const Text('Continue as Guest'),
-                ),
                 const SizedBox(height: 16),
                 Wrap(
                   alignment: WrapAlignment.center,

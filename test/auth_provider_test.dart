@@ -79,18 +79,7 @@ void main() {
     expect(auth.errorMessage, contains('not valid'));
   });
 
-  test('a guest can be upgraded to an email account', () async {
-    final service = FakeAuth(testUser, guest: true);
-    final auth = AuthProvider(authService: service, takeOnboarding: () async => null);
-    await auth.signInAsGuest();
-    expect(auth.isGuest, isTrue);
-    expect(auth.signInMethod, 'Guest');
 
-    expect(await auth.linkGuestToEmail(email: 'new@x.co', name: 'New Name', password: 'secret1'), isTrue);
-    expect(auth.isGuest, isFalse);
-    expect(auth.currentUser!.email, 'new@x.co');
-    expect(auth.currentUser!.name, 'New Name');
-  });
 
   test('updateProfile stores the new profile in memory on success', () async {
     final auth = AuthProvider(authService: FakeAuth(testUser), takeOnboarding: () async => null);

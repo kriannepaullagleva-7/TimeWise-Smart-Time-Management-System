@@ -16,7 +16,6 @@ import '../utils/app_logger.dart';
 import '../utils/feedback.dart';
 import '../widgets/ui.dart';
 import 'appearance_screen.dart';
-import 'auth/link_account_sheet.dart';
 
 /// Profile tab: account, productivity stats, notification and planning
 /// preferences, appearance, and sign-out.
@@ -125,12 +124,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final ok = await confirmAction(
       context,
       title: 'Log out?',
-      message: auth.isGuest
-          ? 'You are using a guest account. If you log out, its tasks and schedule cannot be recovered. '
-              'Create an account first to keep them.'
-          : 'You will need to sign in again to see your tasks.',
+      message: 'You will need to sign in again to see your tasks.',
       confirmLabel: 'Log out',
-      destructive: auth.isGuest,
+      destructive: false,
     );
     if (!ok || !mounted) return;
     await context.read<TaskProvider>().cancelAllReminders();
@@ -202,7 +198,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Center(child: Text(user.name.isEmpty ? 'User' : user.name, style: context.h1)),
             const SizedBox(height: 2),
             Center(
-              child: Text(auth.isGuest ? 'Guest account' : user.email, style: context.bodyMuted),
+              child: Text(user.email, style: context.bodyMuted),
             ),
             const SizedBox(height: 8),
             Center(child: TintBadge(label: 'Signed in with ${auth.signInMethod}', color: context.primary, icon: Icons.verified_user_outlined)),
@@ -216,31 +212,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Expanded(child: _Stat(icon: Icons.timer_outlined, value: focusText, label: 'Focus time')),
               ],
             ),
-            if (auth.isGuest) ...[
-              const SizedBox(height: 16),
-              AppCard(
-                color: context.primary.withValues(alpha: 0.08),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.cloud_off_outlined, color: context.primary),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text('Your data is tied to this device', style: context.h3)),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Create an account to keep your tasks and schedule if you log out or change phone.',
-                      style: context.bodyMuted,
-                    ),
-                    const SizedBox(height: 12),
-                    GradientButton(label: 'Create account', onPressed: () => showLinkAccountSheet(context)),
-                  ],
-                ),
-              ),
-            ],
+
             const SizedBox(height: 24),
             const SectionLabel('Notifications'),
             _Group(children: [

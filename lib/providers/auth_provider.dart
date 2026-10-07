@@ -68,8 +68,6 @@ class AuthProvider extends ChangeNotifier {
   /// Signed in AND the profile is loaded.
   bool get isAuthenticated => _currentUser != null;
 
-  bool get isGuest => _authService.isGuest;
-
   /// "Email", "Google" or "Guest".
   String get signInMethod => _authService.signInMethod;
 
@@ -162,8 +160,6 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> signInWithGoogle() => _run(() => _authService.signInWithGoogle(), cleanupOnFailure: true);
 
-  Future<bool> signInAsGuest() => _run(() => _authService.signInAnonymously(), cleanupOnFailure: true);
-
   /// Copies the quiz answers (taken before sign-in) into the new profile.
   Future<UserModel> _applyOnboarding(UserModel profile) async {
     try {
@@ -199,16 +195,6 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Upgrades the guest account to an e-mail account (keeps all data).
-  Future<bool> linkGuestToEmail({
-    required String email,
-    required String name,
-    required String password,
-  }) {
-    return _run(
-      () => _authService.linkGuestToEmail(email: email, name: name, password: password),
-    );
-  }
 
   Future<void> signOut() async {
     try {

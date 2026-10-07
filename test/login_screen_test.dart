@@ -29,7 +29,7 @@ Future<FakeAuth> _pumpLogin(WidgetTester tester) async {
 void main() {
   setUpAll(loadTestFonts);
 
-  testWidgets('shows the sign-in form with Google and guest options', (tester) async {
+  testWidgets('shows the sign-in form with Google option', (tester) async {
     setDevice(tester, 390, 844);
     await _pumpLogin(tester);
 
@@ -39,7 +39,6 @@ void main() {
     expect(find.byType(TextField), findsNWidgets(2));
     expect(find.text('Forgot password?'), findsOneWidget);
     expect(find.text('Continue with Google'), findsOneWidget);
-    expect(find.text('Continue as Guest'), findsOneWidget);
   });
 
   testWidgets('empty form shows a message under each field', (tester) async {
