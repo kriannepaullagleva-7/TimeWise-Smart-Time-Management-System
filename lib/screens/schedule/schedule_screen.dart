@@ -315,7 +315,7 @@ class _CalendarCard extends StatelessWidget {
         };
         final today = DateTime.now();
         return AppCard(
-          padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+          padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
           child: TableCalendar<int>(
             firstDay: DateTime(today.year - 1, today.month, today.day),
             lastDay: DateTime(today.year + 2, today.month, today.day),
@@ -327,6 +327,7 @@ class _CalendarCard extends StatelessWidget {
             availableCalendarFormats: const {CalendarFormat.month: 'Month', CalendarFormat.week: 'Week'},
             headerVisible: false,
             startingDayOfWeek: StartingDayOfWeek.monday,
+            daysOfWeekHeight: 24,
             rowHeight: 46,
             eventLoader: (day) => marked.contains(DateTime(day.year, day.month, day.day)) ? const [1] : const [],
             calendarStyle: CalendarStyle(
